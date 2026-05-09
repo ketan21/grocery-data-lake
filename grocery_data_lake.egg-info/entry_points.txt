@@ -1,0 +1,2 @@
+[console_scripts]
+grocery = grocery.cli:main
