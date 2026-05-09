@@ -239,7 +239,7 @@ def init_db():
     Base.metadata.create_all(engine)
     # Run additive migrations (idempotent — skips already-applied versions)
     from .migrations import migrate as _run_migrations
-    _run_migrations()
+    _run_migrations(DB_PATH)
 
 
 def store_raw_json(session: Session, product_id: int | None, source: str, data: dict | list, scrape_run_id: int | None = None, sub_source: str | None = None):

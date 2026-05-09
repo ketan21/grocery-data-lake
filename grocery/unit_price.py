@@ -15,6 +15,10 @@ _PRICE_RE = re.compile(
     r"€\s*(?P<price>\d+(?:[,.]\d+)?)\s*/\s*(?P<quantity>\d+(?:[,.]\d+)?)?\s*(?P<unit>[^\s]+)",
     re.IGNORECASE,
 )
+_PRICE_PER_RE = re.compile(
+    r"\bper\s+(?P<unit>[a-zA-Z0-9²]+)\s+€\s*(?P<price>\d+(?:[,.]\d+)?)",
+    re.IGNORECASE,
+)
 
 _UNIT_ALIASES = {
     "g": "g",
@@ -75,15 +79,21 @@ def parse_unit_price(description: str | None) -> ParsedUnitPrice | None:
         return None
 
     match = _PRICE_RE.search(description.strip())
-    if not match:
-        return None
+    if match:
+        unit = _normalize_unit(match.group("unit"))
+        original_price = _to_float(match.group("price"))
+        original_quantity = _to_float(match.group("quantity") or "1")
+    else:
+        match = _PRICE_PER_RE.search(description.strip())
+        if not match:
+            return None
+        unit = _normalize_unit(match.group("unit"))
+        original_price = _to_float(match.group("price"))
+        original_quantity = 1.0
 
-    unit = _normalize_unit(match.group("unit"))
     if unit is None or unit not in _CONVERSIONS:
         return None
 
-    original_price = _to_float(match.group("price"))
-    original_quantity = _to_float(match.group("quantity") or "1")
     if original_quantity <= 0:
         return None
 

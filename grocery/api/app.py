@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from ..db import init_db
-from . import products, categories, stats, price_history, raw_json, bonus
+from . import products, categories, stats, price_history, raw_json, bonus, analytics
 
 def create_app() -> FastAPI:
     init_db()
@@ -22,5 +22,6 @@ def create_app() -> FastAPI:
     app.include_router(price_history.router, prefix="/api", tags=["price-history"])
     app.include_router(raw_json.router, tags=["raw-json"])
     app.include_router(bonus.router, tags=["bonus"])
+    app.include_router(analytics.router)
 
     return app

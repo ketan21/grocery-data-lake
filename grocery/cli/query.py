@@ -429,6 +429,76 @@ def brand_inflation(
     console.print(table)
 
 
+@app.command("bonus-analytics")
+def bonus_analytics(
+    group_by: Annotated[
+        str,
+        typer.Option("--group-by", help="Group by 'brand' or 'product'"),
+    ] = "brand",
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max rows to show")] = 20,
+):
+    """Show promotion frequency and discount depth by brand or product."""
+    if group_by not in {"brand", "product"}:
+        console.print("[red]--group-by must be 'brand' or 'product'[/]")
+        raise typer.Exit(1)
+
+    from ..bonus_analytics import compute_bonus_analytics
+
+    session = _session()
+    result = compute_bonus_analytics(session, group_by=group_by, limit=limit)
+    label = "webshopId" if group_by == "product" else "brand"
+
+    table = Table(title=f"Bonus analytics by {group_by}")
+    table.add_column("Group")
+    table.add_column("Products", justify="right")
+    table.add_column("Bonus", justify="right")
+    table.add_column("Bonus share", justify="right")
+    table.add_column("Avg discount", justify="right")
+    table.add_column("Max discount", justify="right")
+
+    for item in result["items"]:
+        table.add_row(
+            str(item[label])[:50],
+            str(item["productCount"]),
+            str(item["bonusCount"]),
+            f"{item['bonusSharePct']:.2f}%",
+            f"{item['avgDiscountDepthPct']:.2f}%" if item["avgDiscountDepthPct"] is not None else "",
+            f"{item['maxDiscountDepthPct']:.2f}%" if item["maxDiscountDepthPct"] is not None else "",
+        )
+
+    console.print(table)
+
+
+@app.command("health")
+def health_check():
+    """Show operational health checks for the local data lake."""
+    from ..health import get_health_summary, run_quality_checks
+
+    session = _session()
+    summary = get_health_summary(session)
+    latest_run = summary["latestScrapeRun"]
+
+    console.print("\n[bold]Data Lake Health[/]")
+    console.print(f"  Products: {summary['products']}")
+    console.print(f"  Categories: {summary['categories']}")
+    console.print(f"  Raw JSON records: {summary['rawJsonRecords']}")
+    console.print(f"  Detail raw JSON records: {summary['detailRawJsonRecords']}")
+    console.print(f"  Latest price snapshot: {summary['latestPriceSnapshot'] or 'N/A'}")
+    if latest_run:
+        console.print("\n  [bold]Latest scrape run:[/bold]")
+        console.print(f"    Started: {latest_run.started_at}")
+        console.print(f"    Completed: {latest_run.completed_at or 'N/A'}")
+        console.print(f"    Status: {latest_run.status}")
+        console.print(f"    Products scraped: {latest_run.products_scraped}")
+        console.print(f"    Product count delta vs previous run: {summary['productCountDeltaVsPreviousRun'] if summary['productCountDeltaVsPreviousRun'] is not None else 'N/A'}")
+        console.print(f"    Notes: {latest_run.notes or ''}")
+
+    console.print("\n  [bold]Quality checks:[/bold]")
+    for check in run_quality_checks(session):
+        marker = "PASS" if check.passed else "FAIL"
+        console.print(f"    {marker} {check.name}: {check.value} ({check.message})")
+
+
 @app.command("enrich-stats")
 def enrich_stats():
     """Show enrichment statistics (nutrition, allergens, ingredients)."""

@@ -71,6 +71,18 @@ grocery query price-history
 
 # Price history for a specific product
 grocery query price-history 6401
+
+# Derived intelligence
+grocery query normalize-unit-prices
+grocery query cheapest-unit g
+grocery query compute-price-metrics
+grocery query cheapest-prices
+grocery query category-inflation
+grocery query brand-inflation
+grocery query bonus-analytics
+
+# Operational health
+grocery query health
 ```
 
 ### Serving the API
@@ -87,7 +99,7 @@ grocery serve run-server -p 18765
 
 ```
 grocery/
-├── api/            # FastAPI routes (products, categories, stats, price-history)
+├── api/            # FastAPI routes (products, categories, stats, analytics)
 ├── cli/            # Typer CLI commands (scrape, query, enrich, bonus, serve)
 ├── client.py       # AH REST/GraphQL API client
 ├── config.py       # Configuration (delays, rate limits)
@@ -109,6 +121,8 @@ grocery/
 | `allergens` | Per-product allergen info (CONTAINS / MAY_CONTAIN / FREE_FROM) |
 | `ingredients` | Ingredient statements |
 | `price_history` | Price snapshots per scrape run |
+| `unit_prices` | Normalized per-unit prices parsed from AH unit price descriptions |
+| `price_metrics` | Aggregated cheapest, most expensive, average, and volatility metrics |
 | `scrape_runs` | Scrape run metadata |
 | `raw_json` | Raw API responses for debugging |
 
@@ -123,8 +137,19 @@ grocery/
 | `GET /api/price-history` | Price history overview |
 | `GET /api/price-history/{id}` | Per-product price history |
 | `GET /api/price-history/{id}/inflation` | Inflation calculation |
-| `GET /api/raw-json/{source}/{product_id}` | Raw API response |
-| `GET /api/bonus` | Current bonus metadata |
+| `GET /api/raw/stats` | Raw API storage statistics |
+| `GET /api/raw/search/{id}` | Raw search API response |
+| `GET /api/raw/detail/{id}` | Raw detail API response |
+| `GET /api/raw/bonus/{id}` | Raw bonus API response |
+| `GET /api/raw/bonus-metadata` | Latest raw bonus metadata |
+| `GET /api/bonus/overview` | Bonus storage overview |
+| `GET /api/bonus/metadata` | Stored bonus metadata |
+| `GET /api/bonus/items` | Stored bonus items |
+| `GET /api/analytics/price-metrics` | Product price-history metrics |
+| `GET /api/analytics/unit-prices` | Normalized unit price rankings |
+| `GET /api/analytics/category-inflation` | Category price change metrics |
+| `GET /api/analytics/brand-inflation` | Brand price change metrics |
+| `GET /api/analytics/bonus` | Promotion frequency and discount-depth metrics |
 
 ## Rate Limiting
 
@@ -140,4 +165,27 @@ Set up a daily cron job for automatic price tracking:
 ```bash
 # Via the built-in CLI
 hermes cronjob create --prompt "Run 'grocery scrape full' in /home/ubuntu/grocery-data-lake" --schedule "0 9 * * *"
+```
+
+## Backup and Recovery
+
+Before long scrape or enrichment runs, take a timestamped copy of the SQLite database:
+
+```bash
+mkdir -p data/backups
+cp data/grocery.db "data/backups/grocery-$(date +%Y%m%d-%H%M%S).db"
+```
+
+If a scrape is interrupted, inspect the latest run first:
+
+```bash
+grocery query health
+grocery query price-history
+```
+
+Then rerun the same command. Product upserts and price-history dedupe make reruns additive and safe for the same scrape run boundaries. If the latest run is failed but products were partially updated, run `grocery scrape full` again and then refresh derived tables:
+
+```bash
+grocery query normalize-unit-prices
+grocery query compute-price-metrics
 ```
