@@ -116,10 +116,23 @@ def _m003_add_allergen_level_column(conn: sqlite3.Connection) -> None:
     pass
 
 
+def _m004_add_price_history_dedupe_index(conn: sqlite3.Connection) -> None:
+    """Add unique index on price_history(product_id, scrape_run_id) to prevent duplicates (v4)."""
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_price_history_product_run "
+            "ON price_history(product_id, scrape_run_id)"
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "add raw_json.sub_source column", _m001_add_raw_json_sub_source),
     (2, "add product extra detail columns", _m002_add_product_extra_columns),
     (3, "allergen level normalization marker", _m003_add_allergen_level_column),
+    (4, "add price_history dedupe index", _m004_add_price_history_dedupe_index),
 ]
 
 

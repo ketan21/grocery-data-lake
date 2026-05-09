@@ -29,9 +29,9 @@ def _get_token() -> str:
     return _token
 
 
-def get_token() -> str:
-    """Get a valid token, refreshing if expired."""
-    if _token and time.time() < _token_expires_at - 300:  # 5min buffer
+def get_token(force: bool = False) -> str:
+    """Get a valid token, refreshing if expired or if *force* is True."""
+    if not force and _token and time.time() < _token_expires_at - 300:  # 5min buffer
         return _token
     return _get_token()
 

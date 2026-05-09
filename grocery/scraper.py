@@ -19,6 +19,9 @@ from .models import Category, Product
 
 console = Console()
 
+# Commit to SQLite every N products to keep transaction size small.
+COMMIT_INTERVAL = 200
+
 
 def scrape_categories(client: AHClient) -> list[Category]:
     """Fetch and store all categories."""
@@ -96,6 +99,11 @@ def scrape_full_catalog(
     session.commit()
 
     run_id = run.id
+    api_failures = 0
+    total_products = 0
+    new_products = 0
+    updated_products = 0
+    price_snapshots = 0
 
     try:
         # Get categories
@@ -116,10 +124,6 @@ def scrape_full_catalog(
             console=console,
         ) as progress:
             task = progress.add_task("[cyan]Scraping products...", total=None)
-            total_products = 0
-            new_products = 0
-            updated_products = 0
-            price_snapshots = 0
 
             for cat in categories:
                 cat_task = progress.add_task(
@@ -128,11 +132,22 @@ def scrape_full_catalog(
                 page = 0
 
                 while True:
-                    products, raw_response = client.search_products_raw(
-                        query="",
-                        page=page,
-                        taxonomy_id=cat.id,
-                    )
+                    try:
+                        products, raw_response = client.search_products_raw(
+                            query="",
+                            page=page,
+                            taxonomy_id=cat.id,
+                        )
+                    except Exception as e:
+                        api_failures += 1
+                        console.print(f"[red]API error on category {cat.id} page {page}: {e}[/]")
+                        if api_failures > 10:
+                            console.print("[red]Too many API failures — aborting.[/]")
+                            raise
+                        page += 1
+                        time.sleep(SEARCH_DELAY)
+                        continue
+
                     if not products:
                         break
 
@@ -157,7 +172,7 @@ def scrape_full_catalog(
                                 detail_raw = client.get_product_detail(product.webshop_id)
                                 detail = detail_raw
                             except Exception:
-                                pass
+                                api_failures += 1
 
                         is_new = upsert_product(session, product, detail)
                         if is_new:
@@ -169,7 +184,7 @@ def scrape_full_catalog(
                         if detail_raw:
                             store_raw_json(session, product.webshop_id, "detail", detail_raw, run_id)
 
-                        # Record price snapshot for time-series tracking
+                        # Record price snapshot (dedupe handled inside record_price_snapshot)
                         if record_prices:
                             price_data = {
                                 "currentPrice": product.current_price,
@@ -185,8 +200,8 @@ def scrape_full_catalog(
                         total_products += 1
                         progress.update(cat_task, completed=total_products)
 
-                        # Periodic commit every 1000 products to avoid memory bloat
-                        if total_products % 1000 == 0:
+                        # Periodic commit every COMMIT_INTERVAL products
+                        if total_products % COMMIT_INTERVAL == 0:
                             session.commit()
                             console.print(f"  [dim]Committed batch {total_products} products[/]")
 
@@ -198,11 +213,21 @@ def scrape_full_catalog(
 
             progress.update(task, completed=total_products, visible=False)
 
-        # Update run record
+        # Include retry stats from the client
+        retry_info = client.retry_stats()
+
+        # Update run record with detailed notes
         run.products_scraped = total_products
         run.completed_at = datetime.utcnow()
         run.status = "completed"
-        run.notes = f"new={new_products}, updated={updated_products}, price_snapshots={price_snapshots}"
+        notes_parts = [
+            f"new={new_products}",
+            f"updated={updated_products}",
+            f"price_snapshots={price_snapshots}",
+            f"api_failures={api_failures}",
+            f"retried={retry_info.get('retried', 0)}",
+        ]
+        run.notes = ", ".join(notes_parts)
         session.commit()
 
         console.print(f"\n[bold green]Done![/]")
@@ -210,11 +235,20 @@ def scrape_full_catalog(
         console.print(f"  New products: {new_products}")
         console.print(f"  Updated products: {updated_products}")
         console.print(f"  Price snapshots recorded: {price_snapshots}")
+        console.print(f"  API failures (recovered): {api_failures}")
+        console.print(f"  Retries: {retry_info.get('retried', 0)}")
 
         return total_products
 
     except Exception as e:
+        retry_info = client.retry_stats()
+        notes_parts = [
+            f"failed: {e}",
+            f"products_so_far={total_products}",
+            f"api_failures={api_failures}",
+            f"retried={retry_info.get('retried', 0)}",
+        ]
         run.status = "failed"
-        run.notes = str(e)
+        run.notes = ", ".join(notes_parts)
         session.commit()
         raise

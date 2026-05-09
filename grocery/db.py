@@ -265,7 +265,19 @@ def upsert_product(session: Session, product: "Product", detail: dict | None = N
 
 
 def record_price_snapshot(session: Session, product_id: int, price_data: dict, scrape_run_id: int | None = None):
-    """Record a price snapshot in the price_history table for time-series tracking."""
+    """Record a price snapshot in the price_history table for time-series tracking.
+
+    Uses INSERT OR IGNORE with a unique index on (product_id, scrape_run_id)
+    to automatically dedupe — if a snapshot already exists for this product+run,
+    it is silently skipped.
+    """
+    import json
+    existing = session.query(PriceHistoryRow).filter(
+        PriceHistoryRow.product_id == product_id,
+        PriceHistoryRow.scrape_run_id == scrape_run_id,
+    ).first()
+    if existing:
+        return  # Already recorded for this run
     session.add(PriceHistoryRow(
         product_id=product_id,
         current_price=price_data.get("currentPrice"),

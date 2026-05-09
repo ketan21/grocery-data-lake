@@ -11,6 +11,11 @@ from . import config
 from .auth import auth_headers, get_token
 from .models import Category, Product
 
+# HTTP status codes that indicate transient failures worth retrying.
+TRANSIENT_STATUS_CODES = {401, 408, 429, 500, 502, 503, 504}
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0  # seconds — backoff: 1, 2, 4…
+
 
 class AHClient:
     """Albert Heijn API client."""
@@ -21,6 +26,7 @@ class AHClient:
         self.detail_delay = detail_delay
         self._last_search_time = 0.0
         self._last_detail_time = 0.0
+        self._retry_stats = {"retried": 0, "failed_after_retries": 0}
 
     def _search_headers(self) -> dict:
         h = auth_headers()
@@ -40,11 +46,51 @@ class AHClient:
                 time.sleep(self.detail_delay - elapsed)
             self._last_detail_time = time.time()
 
+    def _request_with_retry(self, fn, *, max_retries: int = MAX_RETRIES,
+                            backoff_base: float = RETRY_BASE_DELAY) -> httpx.Response:
+        """Execute *fn*() with exponential backoff for transient HTTP errors.
+
+        Handles 401 (stale token), 429 (rate limit), 408/500/502/503/504
+        and httpx timeouts.  On 401 the token is refreshed before retrying.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = fn()
+                if resp.status_code in TRANSIENT_STATUS_CODES:
+                    if resp.status_code == 401:
+                        # Refresh anonymous token on 401
+                        get_token(force=True)
+                    raise httpx.HTTPStatusError(
+                        f"HTTP {resp.status_code}", request=resp.request, response=resp
+                    )
+                resp.raise_for_status()
+                return resp
+            except (httpx.HTTPStatusError, httpx.TimeoutException,
+                    httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    delay = backoff_base * (2 ** attempt)
+                    self._retry_stats["retried"] += 1
+                    time.sleep(delay)
+                continue
+
+        self._retry_stats["failed_after_retries"] += 1
+        if isinstance(last_exc, httpx.HTTPStatusError):
+            raise last_exc
+        raise last_exc  # type: ignore[misc]
+
+    def retry_stats(self) -> dict:
+        """Return retry statistics for this client session."""
+        return dict(self._retry_stats)
+
     def get_categories(self) -> list[Category]:
         """Fetch 28 top-level categories."""
         self._rate_limit("search")
-        resp = httpx.get(config.CATEGORIES_ENDPOINT, headers=self._search_headers(), timeout=15)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(config.CATEGORIES_ENDPOINT,
+                              headers=self._search_headers(), timeout=15)
+        )
         return [Category(**c) for c in resp.json()]
 
     def search_products(
@@ -60,9 +106,10 @@ class AHClient:
         if taxonomy_id is not None:
             params["taxonomyId"] = taxonomy_id
 
-        resp = httpx.get(config.SEARCH_ENDPOINT, params=params,
-                         headers=self._search_headers(), timeout=30)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(config.SEARCH_ENDPOINT, params=params,
+                              headers=self._search_headers(), timeout=30)
+        )
         data = resp.json()
         return [Product(**p) for p in data.get("products", [])]
 
@@ -83,9 +130,10 @@ class AHClient:
         if taxonomy_id is not None:
             params["taxonomyId"] = taxonomy_id
 
-        resp = httpx.get(config.SEARCH_ENDPOINT, params=params,
-                         headers=self._search_headers(), timeout=30)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(config.SEARCH_ENDPOINT, params=params,
+                              headers=self._search_headers(), timeout=30)
+        )
         data = resp.json()
         products = [Product(**p) for p in data.get("products", [])]
         return products, data
@@ -94,29 +142,32 @@ class AHClient:
         """Look up products by webshopId (returns only found products)."""
         self._rate_limit("search")
         ids_str = ",".join(str(i) for i in webshop_ids)
-        resp = httpx.get(
-            config.BULK_LOOKUP_ENDPOINT,
-            params={"ids": ids_str},
-            headers=self._search_headers(),
-            timeout=30,
+        resp = self._request_with_retry(
+            lambda: httpx.get(
+                config.BULK_LOOKUP_ENDPOINT,
+                params={"ids": ids_str},
+                headers=self._search_headers(),
+                timeout=30,
+            )
         )
-        resp.raise_for_status()
         return [Product(**p) for p in resp.json()]
 
     def get_product_detail(self, webshop_id: int) -> dict:
         """Get full product detail (nutrition, allergens, properties)."""
         self._rate_limit("detail")
         url = config.DETAIL_ENDPOINT.format(webshopId=webshop_id)
-        resp = httpx.get(url, headers=self._search_headers(), timeout=15)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(url, headers=self._search_headers(), timeout=15)
+        )
         return resp.json()
 
     def get_bonus_metadata(self) -> dict:
         """Get bonus period metadata (weekly folders, dates, categories)."""
         self._rate_limit("search")
-        resp = httpx.get(config.BONUS_METADATA_ENDPOINT,
-                         headers=self._search_headers(), timeout=15)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(config.BONUS_METADATA_ENDPOINT,
+                              headers=self._search_headers(), timeout=15)
+        )
         return resp.json()
 
     def get_bonus_section(self, date: str, category: str = None) -> dict:
@@ -144,6 +195,8 @@ class AHClient:
                 "application": config.APPLICATION,
                 "date": date,
             }
-        resp = httpx.get(url, params=params, headers=self._search_headers(), timeout=15)
-        resp.raise_for_status()
+        resp = self._request_with_retry(
+            lambda: httpx.get(url, params=params,
+                              headers=self._search_headers(), timeout=15)
+        )
         return resp.json()

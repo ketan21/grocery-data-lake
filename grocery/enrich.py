@@ -18,8 +18,11 @@ from .db import (
 
 console = Console()
 
+# Commit to SQLite every N products to keep transaction size small.
+COMMIT_INTERVAL = 100
 
-def enrich_products(client: AHClient, batch_size: int = 100) -> dict:
+
+def enrich_products(client: AHClient, batch_size: int = COMMIT_INTERVAL) -> dict:
     """
     Fetch product details for all products in the DB.
     Stores nutrition, allergens, ingredients, and extra fields.
@@ -39,6 +42,7 @@ def enrich_products(client: AHClient, batch_size: int = 100) -> dict:
     console.print(f"[bold blue]Found {len(all_products)} products to enrich[/]")
 
     stats = {"enriched": 0, "skipped": 0, "failed": 0}
+    api_failures = 0
 
     with Progress(
         SpinnerColumn(),
@@ -76,8 +80,9 @@ def enrich_products(client: AHClient, batch_size: int = 100) -> dict:
                     stats["failed"] += 1
 
             except Exception as e:
+                api_failures += 1
                 stats["failed"] += 1
-                if stats["failed"] <= 5:
+                if api_failures <= 5:
                     console.print(f"[red]Error on product {row.webshop_id} ({row.title[:40]}): {e}[/]")
 
             progress.update(task, completed=i + 1)
@@ -85,10 +90,18 @@ def enrich_products(client: AHClient, batch_size: int = 100) -> dict:
             # Rate limiting — ~6.6 req/sec
             time.sleep(0.15)
 
-            # Periodic commit
+            # Periodic commit every batch_size products
             if (i + 1) % batch_size == 0:
                 session.commit()
                 console.print(f"  [dim]Committed batch {i+1}/{len(all_products)} — enriched: {stats['enriched']}, skipped: {stats['skipped']}, failed: {stats['failed']}[/]")
 
     session.commit()
+
+    # Report retry stats from client
+    retry_info = client.retry_stats()
+    if retry_info.get("retried"):
+        console.print(f"  [dim]Client retries: {retry_info['retried']}[/]")
+    if retry_info.get("failed_after_retries"):
+        console.print(f"  [dim]Failed after max retries: {retry_info['failed_after_retries']}[/]")
+
     return stats
