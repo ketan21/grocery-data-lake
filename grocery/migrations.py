@@ -128,11 +128,72 @@ def _m004_add_price_history_dedupe_index(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _m005_add_unit_prices_and_price_metrics(conn: sqlite3.Connection) -> None:
+    """Create normalized unit price and price metrics tables (v5)."""
+    try:
+        conn.execute("ALTER TABLE products ADD COLUMN unit_price_description VARCHAR(100)")
+    except Exception:
+        pass
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS unit_prices (
+            id                             INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id                     INTEGER NOT NULL,
+            normalized_price_eur_per_unit  FLOAT NOT NULL,
+            base_unit                      VARCHAR(20) NOT NULL,
+            original_description           VARCHAR(100) NOT NULL,
+            raw_quantity                   FLOAT NOT NULL,
+            created_at                     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at                     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(product_id) REFERENCES products (webshop_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_unit_prices_product "
+        "ON unit_prices(product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_unit_prices_unit_price "
+        "ON unit_prices(base_unit, normalized_price_eur_per_unit)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS price_metrics (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id            INTEGER NOT NULL,
+            cheapest_price        FLOAT,
+            cheapest_date         DATETIME,
+            most_expensive_price  FLOAT,
+            most_expensive_date   DATETIME,
+            avg_price             FLOAT,
+            price_volatility      FLOAT,
+            total_changes         INTEGER DEFAULT 0,
+            first_seen            DATETIME,
+            last_updated          DATETIME,
+            FOREIGN KEY(product_id) REFERENCES products (webshop_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_price_metrics_product "
+        "ON price_metrics(product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_price_metrics_cheapest "
+        "ON price_metrics(cheapest_price)"
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "add raw_json.sub_source column", _m001_add_raw_json_sub_source),
     (2, "add product extra detail columns", _m002_add_product_extra_columns),
     (3, "allergen level normalization marker", _m003_add_allergen_level_column),
     (4, "add price_history dedupe index", _m004_add_price_history_dedupe_index),
+    (5, "add unit prices and price metrics", _m005_add_unit_prices_and_price_metrics),
 ]
 
 

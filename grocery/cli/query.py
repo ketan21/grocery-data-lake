@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..db import (
     CategoryRow, ProductRow, PriceHistoryRow, ScrapeRun,
     NutritionRow, AllergenRow, IngredientRow, RawJson,
+    UnitPriceRow, PriceMetricsRow,
     get_session, init_db,
 )
 
@@ -208,6 +209,146 @@ def price_history(
             )
 
         console.print(table)
+
+
+@app.command("normalize-unit-prices")
+def normalize_unit_prices_command():
+    """Parse and store normalized unit prices for products."""
+    from ..unit_price import normalize_unit_prices
+
+    session = _session()
+    updated = normalize_unit_prices(session)
+    session.commit()
+
+    console.print(f"[green]Normalized unit prices for {updated} products.[/]")
+
+
+@app.command("cheapest-unit")
+def cheapest_unit(
+    unit: Annotated[
+        str,
+        typer.Argument(help="Base unit to compare: g, ml, m, m2, stuk"),
+    ],
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+    refresh: Annotated[
+        bool,
+        typer.Option("--refresh", help="Rebuild normalized unit prices before querying"),
+    ] = False,
+):
+    """Show cheapest products by normalized unit price."""
+    from ..unit_price import normalize_unit_prices
+
+    session = _session()
+    if refresh:
+        updated = normalize_unit_prices(session)
+        session.commit()
+        console.print(f"[dim]Normalized unit prices for {updated} products.[/]")
+
+    normalized_unit = unit.lower().strip().replace("m²", "m2")
+    results = (
+        session.query(ProductRow, UnitPriceRow)
+        .join(UnitPriceRow, UnitPriceRow.product_id == ProductRow.webshop_id)
+        .filter(UnitPriceRow.base_unit == normalized_unit)
+        .order_by(UnitPriceRow.normalized_price_eur_per_unit.asc())
+        .limit(limit)
+        .all()
+    )
+
+    if not results:
+        console.print(
+            f"[yellow]No unit prices found for '{normalized_unit}'. "
+            "Run with --refresh after scraping product unit prices.[/]"
+        )
+        raise typer.Exit(1)
+
+    table = Table(title=f"Cheapest products per {normalized_unit}")
+    table.add_column("ID", style="dim")
+    table.add_column("Title")
+    table.add_column("Brand")
+    table.add_column("Current Price", justify="right")
+    table.add_column(f"EUR/{normalized_unit}", justify="right")
+    table.add_column("Original")
+
+    for product, unit_price in results:
+        table.add_row(
+            str(product.webshop_id),
+            product.title[:50] if product.title else "",
+            product.brand or "",
+            f"€{product.current_price:.2f}" if product.current_price else "",
+            f"€{unit_price.normalized_price_eur_per_unit:.6f}",
+            unit_price.original_description,
+        )
+
+    console.print(table)
+
+
+@app.command("compute-price-metrics")
+def compute_price_metrics_command():
+    """Compute and store price-history metrics for all products."""
+    from ..analytics import compute_price_metrics
+
+    session = _session()
+    updated = compute_price_metrics(session)
+    session.commit()
+
+    console.print(f"[green]Computed price metrics for {updated} products.[/]")
+
+
+@app.command("cheapest-prices")
+def cheapest_prices(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+    compute: Annotated[
+        bool,
+        typer.Option("--compute", help="Recompute price metrics before querying"),
+    ] = False,
+):
+    """Show products with the cheapest observed prices."""
+    from ..analytics import compute_price_metrics
+
+    session = _session()
+    if compute:
+        updated = compute_price_metrics(session)
+        session.commit()
+        console.print(f"[dim]Computed price metrics for {updated} products.[/]")
+
+    results = (
+        session.query(ProductRow, PriceMetricsRow)
+        .join(PriceMetricsRow, PriceMetricsRow.product_id == ProductRow.webshop_id)
+        .filter(PriceMetricsRow.cheapest_price.isnot(None))
+        .order_by(PriceMetricsRow.cheapest_price.asc())
+        .limit(limit)
+        .all()
+    )
+
+    if not results:
+        console.print(
+            "[yellow]No price metrics found. Run 'grocery query compute-price-metrics' first.[/]"
+        )
+        raise typer.Exit(1)
+
+    table = Table(title="Cheapest observed prices")
+    table.add_column("ID", style="dim")
+    table.add_column("Title")
+    table.add_column("Brand")
+    table.add_column("Cheapest", justify="right")
+    table.add_column("Date")
+    table.add_column("Avg", justify="right")
+    table.add_column("Volatility", justify="right")
+    table.add_column("Changes", justify="right")
+
+    for product, metrics in results:
+        table.add_row(
+            str(product.webshop_id),
+            product.title[:50] if product.title else "",
+            product.brand or "",
+            f"€{metrics.cheapest_price:.2f}" if metrics.cheapest_price is not None else "",
+            metrics.cheapest_date.strftime("%Y-%m-%d") if metrics.cheapest_date else "",
+            f"€{metrics.avg_price:.2f}" if metrics.avg_price is not None else "",
+            f"{metrics.price_volatility:.4f}" if metrics.price_volatility is not None else "",
+            str(metrics.total_changes or 0),
+        )
+
+    console.print(table)
 
 
 @app.command("enrich-stats")

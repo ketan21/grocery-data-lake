@@ -33,6 +33,7 @@ class ProductRow(Base):
     title = Column(String(500), nullable=False)
     brand = Column(String(255))
     sales_unit_size = Column(String(100))
+    unit_price_description = Column(String(100))
     current_price = Column(Float)
     price_before_bonus = Column(Float)
     main_category = Column(String(255))
@@ -53,6 +54,8 @@ class ProductRow(Base):
     ingredient_rows = relationship("IngredientRow", back_populates="product", cascade="all, delete-orphan")
     image_rows = relationship("ImageRow", back_populates="product", cascade="all, delete-orphan")
     price_history_rows = relationship("PriceHistoryRow", back_populates="product", cascade="all, delete-orphan")
+    unit_price_rows = relationship("UnitPriceRow", back_populates="product", cascade="all, delete-orphan")
+    price_metrics_row = relationship("PriceMetricsRow", back_populates="product", uselist=False, cascade="all, delete-orphan")
 
     # Extra detail fields (populated from /detail/v4/fir)
     ingredients = Column(Text)  # JSON array
@@ -126,6 +129,51 @@ class PriceHistoryRow(Base):
     scrape_run_id = Column(Integer)  # links to scrape_runs
 
     product = relationship("ProductRow", back_populates="price_history_rows")
+
+
+class UnitPriceRow(Base):
+    """Normalized per-unit price parsed from AH unit price descriptions."""
+    __tablename__ = "unit_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey("products.webshop_id"), nullable=False)
+    normalized_price_eur_per_unit = Column(Float, nullable=False)
+    base_unit = Column(String(20), nullable=False)
+    original_description = Column(String(100), nullable=False)
+    raw_quantity = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    product = relationship("ProductRow", back_populates="unit_price_rows")
+
+    __table_args__ = (
+        Index("ux_unit_prices_product", "product_id", unique=True),
+        Index("ix_unit_prices_unit_price", "base_unit", "normalized_price_eur_per_unit"),
+    )
+
+
+class PriceMetricsRow(Base):
+    """Aggregated price-history metrics per product."""
+    __tablename__ = "price_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey("products.webshop_id"), nullable=False)
+    cheapest_price = Column(Float)
+    cheapest_date = Column(DateTime)
+    most_expensive_price = Column(Float)
+    most_expensive_date = Column(DateTime)
+    avg_price = Column(Float)
+    price_volatility = Column(Float)
+    total_changes = Column(Integer, default=0)
+    first_seen = Column(DateTime)
+    last_updated = Column(DateTime)
+
+    product = relationship("ProductRow", back_populates="price_metrics_row")
+
+    __table_args__ = (
+        Index("ux_price_metrics_product", "product_id", unique=True),
+        Index("ix_price_metrics_cheapest", "cheapest_price"),
+    )
 
 
 class ScrapeRun(Base):
@@ -222,6 +270,7 @@ def upsert_product(session: Session, product: "Product", detail: dict | None = N
         "title": product.title,
         "brand": product.brand,
         "sales_unit_size": product.sales_unit_size,
+        "unit_price_description": product.unit_price_description,
         "current_price": product.current_price,
         "price_before_bonus": product.price_before_bonus,
         "main_category": product.main_category,
