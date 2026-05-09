@@ -124,7 +124,7 @@ def scrape_bonus() -> dict:
     # Update scrape run
     run.status = "completed"
     run.completed_at = datetime.utcnow()
-    run.scraped_products = len(bonus_products)
+    run.products_scraped = len(bonus_products)
     session.commit()
 
     summary = {

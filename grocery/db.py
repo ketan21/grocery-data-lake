@@ -322,7 +322,15 @@ def _store_allergens(session: Session, product_id: int, detail: dict) -> None:
         for item in ag_group.get("items", []):
             tc = item.get("typeCode", {})
             name = tc.get("label", tc.get("value", "unknown"))
-            level = "CONTAINS"  # default
+            loc = item.get("levelOfContainmentCode", {})
+            level_code = loc.get("value", "CONTAINS") if loc else "CONTAINS"
+            # Map API codes to DB values; default to CONTAINS for unknowns
+            if level_code == "MAY_CONTAIN":
+                level = "MAY_CONTAIN"
+            elif level_code == "FREE_FROM":
+                level = "FREE_FROM"
+            else:
+                level = "CONTAINS"
             session.add(AllergenRow(product_id=product_id, allergen_name=name, level=level))
 
 
@@ -376,8 +384,8 @@ def _store_extra_fields(session: Session, product_id: int, detail: dict) -> None
     if origin:
         row.origin_country = origin
 
-    # Barcode
-    barcode = ti.get("barcode") or detail.get("barcode") or ti.get("gtin")
+    # Barcode — prioritize gtin (always present when available), fall back to barcode
+    barcode = ti.get("gtin") or ti.get("barcode") or detail.get("barcode") or detail.get("gtin")
     if barcode:
         row.barcode = str(barcode)
 
