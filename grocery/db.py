@@ -234,9 +234,12 @@ def get_session():
 
 
 def init_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, then run pending migrations."""
     engine = get_engine()
     Base.metadata.create_all(engine)
+    # Run additive migrations (idempotent — skips already-applied versions)
+    from .migrations import migrate as _run_migrations
+    _run_migrations()
 
 
 def store_raw_json(session: Session, product_id: int | None, source: str, data: dict | list, scrape_run_id: int | None = None, sub_source: str | None = None):

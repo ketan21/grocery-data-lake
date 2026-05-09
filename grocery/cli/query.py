@@ -351,6 +351,84 @@ def cheapest_prices(
     console.print(table)
 
 
+@app.command("category-inflation")
+def category_inflation(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max categories to show")] = 20,
+):
+    """Show category-level inflation metrics from price history."""
+    from ..category_analytics import compute_category_inflation
+
+    session = _session()
+    results = compute_category_inflation(session)
+
+    if not results:
+        console.print(
+            "[yellow]No inflation data available. "
+            "You need at least 2 price snapshots per product across multiple scrape runs.[/]"
+        )
+        raise typer.Exit(1)
+
+    table = Table(title="Category inflation (price change %)")
+    table.add_column("Category")
+    table.add_column("Avg change %", justify="right")
+    table.add_column("Median change %", justify="right")
+    table.add_column("↑ Increases", justify="right")
+    table.add_column("↓ Decreases", justify="right")
+    table.add_column("Unchanged", justify="right")
+    table.add_column("Tracked", justify="right")
+
+    for r in results[:limit]:
+        table.add_row(
+            (r["category"] or "Unknown")[:40],
+            f"{r['avg_price_change_pct']:+.2f}%",
+            f"{r['median_price_change_pct']:+.2f}%",
+            str(r["products_with_increases"]),
+            str(r["products_with_decreases"]),
+            str(r["products_unchanged"]),
+            str(r["total_products_tracked"]),
+        )
+
+    console.print(table)
+
+
+@app.command("brand-inflation")
+def brand_inflation(
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max brands to show")] = 20,
+):
+    """Show brand-level inflation metrics from price history."""
+    from ..category_analytics import compute_brand_inflation
+
+    session = _session()
+    results = compute_brand_inflation(session)
+
+    if not results:
+        console.print(
+            "[yellow]No inflation data available. "
+            "You need at least 2 price snapshots per product across multiple scrape runs.[/]"
+        )
+        raise typer.Exit(1)
+
+    table = Table(title="Brand inflation (price change %)")
+    table.add_column("Brand")
+    table.add_column("Avg change %", justify="right")
+    table.add_column("↑ Increases", justify="right")
+    table.add_column("↓ Decreases", justify="right")
+    table.add_column("Unchanged", justify="right")
+    table.add_column("Tracked", justify="right")
+
+    for r in results[:limit]:
+        table.add_row(
+            (r["brand"] or "Unknown")[:40],
+            f"{r['avg_price_change_pct']:+.2f}%",
+            str(r["products_with_increases"]),
+            str(r["products_with_decreases"]),
+            str(r["products_unchanged"]),
+            str(r["total_products_tracked"]),
+        )
+
+    console.print(table)
+
+
 @app.command("enrich-stats")
 def enrich_stats():
     """Show enrichment statistics (nutrition, allergens, ingredients)."""

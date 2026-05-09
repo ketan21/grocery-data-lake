@@ -2,14 +2,7 @@
 
 ## Current State
 
-This project is intended to be a grocery intelligence data lake for Albert Heijn product data. It already has the main pieces in place:
-
-- AH anonymous auth and a rate-limited HTTP client.
-- Category-based product scraping via `taxonomyId`.
-- Product enrichment from the detail endpoint for nutrition, allergens, ingredients, barcodes, and raw JSON.
-- SQLite storage through the SQLAlchemy implementation in `grocery/db.py`.
-- CLI commands for scraping, enrichment, querying, serving the API, and bonus scraping.
-- FastAPI routes for products, categories, stats, price history, and raw JSON.
+This project is a grocery intelligence data lake for Albert Heijn product data.
 
 Current local database baseline:
 
@@ -19,90 +12,101 @@ Current local database baseline:
 - `allergens`: 15,535 rows
 - `ingredients`: 850 rows
 - `images`: 5,190 rows
-- `price_history`: 1 row
-- `scrape_runs`: 2 rows
-- `raw_json`: 23 rows
+- `price_history`: 1 row (only 1 product tracked — scraping not recording prices properly)
+- `scrape_runs`: 8 rows
+- `raw_json`: 23+ rows
+- Migrations: 4/5 applied (v5 pending — unit_prices + price_metrics tables)
 
-The Hermes skill documentation at `/home/ubuntu/.hermes/skills/nl-grocery-api-integration` describes this project as the working data lake. The current repo mostly follows that intended design, but implementation, schema, tests, and operational notes have drifted.
+## Phase 1: Stabilize Runtime — ✅ DONE
 
-## Top Risks
+- [x] Install and verify project dependencies from `pyproject.toml`
+- [x] Fix the missing SQLAlchemy `Index` import (was already fixed)
+- [x] Quarantine stale async database/repository modules → moved to `stale/` with README
+- [x] Remove obsolete CDP probe tests → moved to `stale/`
+- [x] Replace stale tests with current smoke tests → 6 tests passing (`pytest -q`)
+- [x] Verify CLI import works: `from grocery.cli import main` ✓
+- [x] Verify API import works: `from grocery.api.app import create_app` ✓
 
-- Runtime imports fail in the current environment because `sqlalchemy` is not installed.
-- `grocery/db.py` uses `Index(...)` but does not import `Index` from SQLAlchemy.
-- The existing `raw_json` table does not include the ORM's `sub_source` column. `Base.metadata.create_all()` will not add this column to an existing SQLite table.
-- `grocery/database.py` and `grocery/repository.py` are stale async/aiosqlite code paths that reference removed config and model APIs.
-- The test suite targets an older async implementation and currently fails during collection.
-- `grocery/bonus_scraper.py` sets `run.scraped_products`, but the SQLAlchemy model field is `products_scraped`.
-- Allergen enrichment currently defaults every allergen to `CONTAINS` instead of parsing `levelOfContainmentCode`.
-- Barcode extraction should prioritize `tradeItem.gtin`.
-- The skill docs mention a daily scrape cron job, but no user crontab is currently installed.
+## Phase 2: Fix Schema and Data Correctness — ✅ DONE
 
-## Improvement Backlog
+- [x] Additive SQLite migration path → `grocery/migrations.py` with 5 migrations, version tracker
+- [x] `raw_json.sub_source` column added (migration v1, applied)
+- [x] Extra product columns added (migration v2, applied)
+- [x] Parse allergen containment level from `levelOfContainmentCode` → implemented in `db.py:386-394`
+- [x] Prioritize `tradeItem.gtin` for barcode extraction → implemented in `db.py:448-451`
+- [x] Fix bonus scrape run accounting → `bonus_scraper.py:127` uses `products_scraped` correctly
+- [x] Raw bonus storage validated against `source`, `sub_source`, `scrape_run_id`, nullable `product_id`
 
-### Phase 1: Stabilize Runtime
+## Phase 3: Make Scraping Repeatable — ✅ DONE
 
-- Install and verify project dependencies from `pyproject.toml`, including dev dependencies.
-- Fix the missing SQLAlchemy `Index` import.
-- Remove, quarantine, or clearly mark the stale async database/repository modules as obsolete.
-- Remove or isolate the obsolete CDP probe tests that require `websockets`.
-- Replace stale tests with current SQLAlchemy, CLI, API, and data parsing smoke tests.
-- Verify these commands work:
-  - `python3 -m grocery.cli --help`
-  - `python3 -c 'from grocery.api.app import create_app; print(create_app().title)'`
-  - `pytest -q`
+- [x] Retry/backoff handling around AH API calls → `client.py` with exponential backoff (1s, 2s, 4s...), max 3 retries, token refresh on 401
+- [x] Retry stats tracked and reported in scrape run notes
+- [x] Scrape-run failure notes with counts → `scraper.py:219-252` builds detailed notes with products/categories/retries
+- [x] Price history dedupe policy → `record_price_snapshot` checks for existing product+run combo; migration v4 adds unique index
+- [ ] Document safe scrape/enrichment commands in README (partially done — needs update)
 
-### Phase 2: Fix Schema and Data Correctness
+## Phase 4: Add Grocery Intelligence Features — ⚠️ PARTIAL
 
-- Add an explicit additive SQLite migration path instead of relying on `create_all()` for schema upgrades.
-- Start migrations by adding `raw_json.sub_source` when missing.
-- Parse allergen containment level from `tradeItem.allergenInformation[].items[].levelOfContainmentCode`.
-- Prioritize `tradeItem.gtin` for barcode extraction.
-- Fix bonus scrape run accounting by writing `products_scraped`.
-- Validate raw bonus storage against `source`, `sub_source`, `scrape_run_id`, and nullable `product_id`.
+Code exists but not fully wired up or populated:
 
-### Phase 3: Make Scraping Repeatable
+- [x] Unit price normalization → `grocery/unit_price.py` with regex parser + unit aliases
+- [x] Price metrics table schema → `price_metrics` table in migration v5 (cheapest, most expensive, avg, volatility)
+- [x] Price metrics computation → `grocery/analytics.py` with `compute_price_metrics()`
+- [x] Category-level inflation summaries → `grocery/category_analytics.py` with `compute_category_inflation()`
+- [ ] Unit price enrichment CLI command (needs wiring)
+- [ ] Price metrics computation CLI command (needs wiring)
+- [ ] Category inflation CLI command (needs wiring)
+- [ ] Bonus frequency and promotion-depth analytics per product/brand
+- [ ] Query/API endpoints for derived metrics (unit prices, price metrics, category inflation)
+- [ ] Run unit price normalization against existing products
+- [ ] Run price metrics computation (blocked on price_history data — only 1 record)
 
-- Document safe scrape and enrichment commands in a project README or operations note.
-- Decide and enforce a smaller commit cadence for long scrapes to reduce data-loss risk.
-- Add retry/backoff handling around AH API calls for transient 401, 429, 503, timeout, and JSON parse failures.
-- Add scrape-run failure notes that include counts of failed pages, failed details, and skipped records.
-- Add a dedupe policy for price history if daily runs create duplicate unchanged snapshots.
+## Phase 5: Operations — ❌ NOT STARTED
 
-### Phase 4: Add Grocery Intelligence Features
+- [ ] Auto-run migrations on startup (migrations.py exists but not called automatically)
+- [ ] Documented daily scheduling setup for full scrape or price-only scrape
+- [ ] Backup guidance before scrape and enrichment runs
+- [ ] Run health checks CLI command:
+  - Last scrape status
+  - Product count delta
+  - Failed detail count
+  - Raw JSON count
+  - Latest price snapshot date
+- [ ] Simple recovery workflow for interrupted scrapes
 
-- Normalize unit prices from `unit_price_description` for cross-product comparison.
-- Add cheapest observed price and price change metrics per product.
-- Add category-level inflation summaries.
-- Add bonus frequency and promotion-depth analytics per product and brand.
-- Add query/API endpoints for these derived metrics.
-- Keep raw JSON as the audit source so parsers can be corrected and replayed later.
+## Remaining Work (Priority Order)
 
-### Phase 5: Operations
+### Immediate (unblocks everything else)
+1. **Run migration v5** — create `unit_prices` and `price_metrics` tables
+2. **Auto-run migrations** on CLI/API startup
+3. **Fix price scraping** — scrape runs show 0 products scraped; price_history has only 1 record
+4. **Wire up analytics CLI commands** — unit price, price metrics, category inflation
 
-- Add documented daily scheduling setup for full scrape or price-only scrape.
-- Add backup guidance before scrape and enrichment runs.
-- Add run health checks:
-  - last scrape status
-  - product count delta
-  - failed detail count
-  - raw JSON count
-  - latest price snapshot date
-- Add a simple recovery workflow for interrupted scrapes.
+### Short-term
+5. **Run a full scrape + enrich cycle** to build real price history data
+6. **Add bonus analytics** — promotion frequency, depth per product/brand
+7. **Add API endpoints** for derived metrics
+8. **Health check CLI command**
+9. **Cron job** for daily price snapshots
+
+### Long-term
+10. Multi-store comparison (Jumbo, etc.)
+11. Receipt data (requires authenticated user tokens)
 
 ## Acceptance Criteria
 
-- CLI and API imports succeed in a fresh environment after installing dependencies.
-- `pytest -q` collects and runs tests for the current implementation without stale import errors.
-- Existing `data/grocery.db` remains readable and receives only additive migrations.
+- CLI and API imports succeed in a fresh environment after installing dependencies. ✅
+- `pytest -q` collects and runs tests without stale import errors. ✅ (6 passed)
+- Existing `data/grocery.db` remains readable and receives only additive migrations. ✅
 - `grocery query stats` works against the existing database.
-- FastAPI product, category, stats, price-history, and raw JSON endpoints work against the existing database.
-- Enrichment stores GTIN barcodes and correct allergen containment levels.
-- Bonus scraping records raw bonus JSON and updates scrape-run counts without attribute drift.
-- The roadmap clearly separates reliability work from later analytics features.
+- FastAPI product, category, stats, price-history, and raw JSON endpoints work.
+- Enrichment stores GTIN barcodes and correct allergen containment levels. ✅
+- Bonus scraping records raw bonus JSON and updates scrape-run counts. ✅
+- Price history has meaningful data from multiple scrape runs. ❌
+- Analytics endpoints return computed metrics. ❌
 
 ## Assumptions
 
-- The active implementation path is SQLAlchemy in `grocery/db.py`; the async `aiosqlite` path is stale.
-- `SKILL.md` and `references/data-lake-implementation.md` are the intended source of truth for this project.
-- The skill reference that says all AH REST endpoints return 404 is treated as stale or as a failed probing trace.
-- Initial work should prioritize reliability and data correctness before adding new intelligence features.
+- The active implementation path is SQLAlchemy in `grocery/db.py`; the async `aiosqlite` path is stale (quarantined in `stale/`).
+- `SKILL.md` and `references/data-lake-implementation.md` are the intended source of truth.
+- Initial work prioritizes reliability and data correctness before adding new intelligence features.
