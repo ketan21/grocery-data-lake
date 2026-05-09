@@ -140,6 +140,14 @@ def scrape_full_catalog(
                         )
                     except Exception as e:
                         api_failures += 1
+                        # 400 on a paginated search = API says "no more pages" —
+                        # treat it as end of results for this category and continue.
+                        if "400" in str(e):
+                            console.print(
+                                f"[dim]Category {cat.id} page {page}: "
+                                f"400 Bad Request — treating as end of results.[/]"
+                            )
+                            break
                         console.print(f"[red]API error on category {cat.id} page {page}: {e}[/]")
                         if api_failures > 10:
                             console.print("[red]Too many API failures — aborting.[/]")
