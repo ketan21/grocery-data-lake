@@ -7,7 +7,15 @@ from fastapi import APIRouter, Query
 from ..analytics import compute_price_metrics
 from ..bonus_analytics import compute_bonus_analytics
 from ..category_analytics import compute_brand_inflation, compute_category_inflation
-from ..db import PriceMetricsRow, ProductRow, UnitPriceRow, get_session
+from ..db import (
+    DashboardBonusMetricRow,
+    DashboardBrandMetricRow,
+    DashboardCategoryMetricRow,
+    PriceMetricsRow,
+    ProductRow,
+    UnitPriceRow,
+    get_session,
+)
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -126,3 +134,87 @@ def bonus_analytics(
     """Return promotion frequency and discount-depth metrics by brand or product."""
     session = get_session()
     return compute_bonus_analytics(session, group_by=group_by, limit=limit)
+
+
+@router.get("/serving/category-metrics")
+def serving_category_metrics(limit: int = Query(20, ge=1, le=200)):
+    """Return materialized dashboard category metrics."""
+    session = get_session()
+    rows = (
+        session.query(DashboardCategoryMetricRow)
+        .order_by(DashboardCategoryMetricRow.avg_price_change_pct.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "categories": [
+            {
+                "category": row.category,
+                "avgPriceChangePct": row.avg_price_change_pct,
+                "medianPriceChangePct": row.median_price_change_pct,
+                "productsWithIncreases": row.products_with_increases,
+                "productsWithDecreases": row.products_with_decreases,
+                "productsUnchanged": row.products_unchanged,
+                "totalProductsTracked": row.total_products_tracked,
+                "computedAt": row.computed_at.isoformat() if row.computed_at else None,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/serving/brand-metrics")
+def serving_brand_metrics(limit: int = Query(20, ge=1, le=200)):
+    """Return materialized dashboard brand metrics."""
+    session = get_session()
+    rows = (
+        session.query(DashboardBrandMetricRow)
+        .order_by(DashboardBrandMetricRow.avg_price_change_pct.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "brands": [
+            {
+                "brand": row.brand,
+                "avgPriceChangePct": row.avg_price_change_pct,
+                "productsWithIncreases": row.products_with_increases,
+                "productsWithDecreases": row.products_with_decreases,
+                "productsUnchanged": row.products_unchanged,
+                "totalProductsTracked": row.total_products_tracked,
+                "computedAt": row.computed_at.isoformat() if row.computed_at else None,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/serving/bonus-metrics")
+def serving_bonus_metrics(
+    group_by: str = Query("brand", pattern="^(brand|product)$"),
+    limit: int = Query(20, ge=1, le=200),
+):
+    """Return materialized dashboard promotion metrics."""
+    session = get_session()
+    rows = (
+        session.query(DashboardBonusMetricRow)
+        .filter(DashboardBonusMetricRow.group_by == group_by)
+        .order_by(DashboardBonusMetricRow.bonus_count.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "groupBy": group_by,
+        "items": [
+            {
+                "groupKey": row.group_key,
+                "productCount": row.product_count,
+                "bonusCount": row.bonus_count,
+                "bonusSharePct": row.bonus_share_pct,
+                "avgDiscountDepthPct": row.avg_discount_depth_pct,
+                "maxDiscountDepthPct": row.max_discount_depth_pct,
+                "computedAt": row.computed_at.isoformat() if row.computed_at else None,
+            }
+            for row in rows
+        ],
+    }

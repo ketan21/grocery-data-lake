@@ -176,6 +176,65 @@ class PriceMetricsRow(Base):
     )
 
 
+class DashboardCategoryMetricRow(Base):
+    """Materialized category metrics for dashboard/API serving."""
+    __tablename__ = "dashboard_category_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String(255), nullable=False)
+    avg_price_change_pct = Column(Float)
+    median_price_change_pct = Column(Float)
+    products_with_increases = Column(Integer, default=0)
+    products_with_decreases = Column(Integer, default=0)
+    products_unchanged = Column(Integer, default=0)
+    total_products_tracked = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ux_dashboard_category_metrics_category", "category", unique=True),
+        Index("ix_dashboard_category_metrics_avg_change", "avg_price_change_pct"),
+    )
+
+
+class DashboardBrandMetricRow(Base):
+    """Materialized brand metrics for dashboard/API serving."""
+    __tablename__ = "dashboard_brand_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    brand = Column(String(255), nullable=False)
+    avg_price_change_pct = Column(Float)
+    products_with_increases = Column(Integer, default=0)
+    products_with_decreases = Column(Integer, default=0)
+    products_unchanged = Column(Integer, default=0)
+    total_products_tracked = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ux_dashboard_brand_metrics_brand", "brand", unique=True),
+        Index("ix_dashboard_brand_metrics_avg_change", "avg_price_change_pct"),
+    )
+
+
+class DashboardBonusMetricRow(Base):
+    """Materialized promotion metrics by brand or product."""
+    __tablename__ = "dashboard_bonus_metrics"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    group_by = Column(String(20), nullable=False)
+    group_key = Column(String(255), nullable=False)
+    product_count = Column(Integer, default=0)
+    bonus_count = Column(Integer, default=0)
+    bonus_share_pct = Column(Float)
+    avg_discount_depth_pct = Column(Float)
+    max_discount_depth_pct = Column(Float)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ux_dashboard_bonus_metrics_group", "group_by", "group_key", unique=True),
+        Index("ix_dashboard_bonus_metrics_bonus_count", "bonus_count"),
+    )
+
+
 class ScrapeRun(Base):
     __tablename__ = "scrape_runs"
 

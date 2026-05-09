@@ -15,9 +15,12 @@ Current local database baseline:
 - `price_history`: 51,338 rows across 4 scrape runs
 - `price_metrics`: 7,824 rows
 - `unit_prices`: 16,988 rows
+- `dashboard_category_metrics`: 23 rows
+- `dashboard_brand_metrics`: 512 rows
+- `dashboard_bonus_metrics`: 29,651 rows
 - `scrape_runs`: 11 rows
 - `raw_json`: 65,089 rows
-- Migrations: 5/5 applied
+- Migrations: 6/6 applied
 
 ## Phase 1: Stabilize Runtime - DONE
 
@@ -63,10 +66,14 @@ Current local database baseline:
   - `/api/analytics/price-metrics`
   - `/api/analytics/unit-prices`
   - `/api/analytics/category-inflation`
-  - `/api/analytics/brand-inflation`
-  - `/api/analytics/bonus`
+- `/api/analytics/brand-inflation`
+- `/api/analytics/bonus`
+- `/api/analytics/serving/category-metrics`
+- `/api/analytics/serving/brand-metrics`
+- `/api/analytics/serving/bonus-metrics`
 - [x] Unit price normalization run against existing products
 - [x] Price metrics computation run against existing price history
+- [x] Materialized dashboard serving tables defined for category, brand, and bonus metrics
 
 ## Phase 5: Operations - DONE
 
@@ -74,6 +81,8 @@ Current local database baseline:
 - [x] Daily scheduling example documented
 - [x] Backup guidance before scrape and enrichment runs documented
 - [x] Health check CLI command: `grocery query health`
+- [x] Derived rebuild job: `grocery jobs rebuild-derived`
+- [x] Daily orchestration job: `grocery jobs daily-snapshot`
 - [x] Recovery workflow for interrupted scrapes documented
 
 ## Acceptance Criteria
@@ -92,12 +101,14 @@ Current local database baseline:
 
 ## Verified Checks
 
-- `pytest -q` -> 9 passed
+- `pytest -q` -> 13 passed
 - `grocery query stats` -> works
 - `grocery query price-history` -> works
 - `grocery query cheapest-unit g --limit 3` -> works
 - `grocery query bonus-analytics --limit 3` -> works
 - `grocery query health` -> works
+- `grocery jobs rebuild-derived` -> rebuilds deterministic derived and serving tables
+- `grocery jobs daily-snapshot --skip-scrape` -> rebuilds serving tables and runs health checks without network scrape
 - FastAPI TestClient checks pass for analytics endpoints
 
 ## Long-Term Extensions
@@ -133,6 +144,27 @@ These findings guide the next phase from prototype toward a reliable grocery int
 - [x] Add temp-DB tests for unit price parsing, analytics endpoints, bonus semantics, health checks, and CLI registration.
 - [x] Fix `init_db()` migration path so tests using monkeypatched `DB_PATH` stay isolated.
 - [x] Add operational job command: `grocery jobs rebuild-derived`.
-- [ ] Add persistent serving tables for dashboard-ready bonus/category/brand metrics.
-- [ ] Add a full daily job command that runs scrape, rebuild-derived, health checks, and emits a single summary.
-- [ ] Add multi-retailer schema design notes before expanding beyond Albert Heijn.
+- [x] Add persistent serving tables for dashboard-ready bonus/category/brand metrics.
+- [x] Add a full daily job command that runs scrape, rebuild-derived, health checks, and emits a single summary.
+- [x] Add multi-retailer schema design notes before expanding beyond Albert Heijn.
+
+## Multi-Retailer Schema Direction
+
+Before adding another retailer, introduce retailer-aware identity and taxonomy concepts so AH-specific assumptions do not leak into the platform.
+
+- `retailers`: stable retailer metadata such as `id`, `name`, `country`, `currency`, `base_url`, and active status.
+- `retailer_products`: retailer-scoped product identifiers, including `retailer_id`, `retailer_product_id`, title, brand, package size, availability, and current retailer taxonomy references.
+- `canonical_products`: cross-retailer product identity keyed by GTIN/barcode where possible, with fallback matching by normalized brand, title, and package size.
+- `product_matches`: mapping between `retailer_products` and `canonical_products`, including match method, confidence, and reviewed status.
+- `retailer_categories`: raw retailer category taxonomies, preserving source hierarchy.
+- `canonical_categories`: normalized grocery taxonomy used for cross-retailer analytics.
+- `price_observations`: retailer-scoped time-series prices with promotion state, scrape run, and observed timestamp.
+- `promotion_observations`: retailer-scoped promotion windows, mechanism, discount depth, and source payload linkage.
+- `retailer_raw_json`: source payload storage partitioned by retailer/source/run for replay and auditing.
+
+Migration strategy:
+
+- Keep the current AH tables as the local AH implementation path until multi-retailer ingestion exists.
+- Add new retailer-aware tables additively rather than rewriting the current schema in place.
+- Backfill AH data into retailer-aware tables with `retailer_id='ah'` once a second retailer is ready.
+- Keep dashboard serving tables sourced from canonical retailer-aware tables after backfill.

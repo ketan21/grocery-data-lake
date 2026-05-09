@@ -188,12 +188,88 @@ def _m005_add_unit_prices_and_price_metrics(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _m006_add_dashboard_serving_tables(conn: sqlite3.Connection) -> None:
+    """Create materialized dashboard serving tables (v6)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dashboard_category_metrics (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            category                 VARCHAR(255) NOT NULL,
+            avg_price_change_pct     FLOAT,
+            median_price_change_pct  FLOAT,
+            products_with_increases  INTEGER DEFAULT 0,
+            products_with_decreases  INTEGER DEFAULT 0,
+            products_unchanged       INTEGER DEFAULT 0,
+            total_products_tracked   INTEGER DEFAULT 0,
+            computed_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_dashboard_category_metrics_category "
+        "ON dashboard_category_metrics(category)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_dashboard_category_metrics_avg_change "
+        "ON dashboard_category_metrics(avg_price_change_pct)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dashboard_brand_metrics (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            brand                    VARCHAR(255) NOT NULL,
+            avg_price_change_pct     FLOAT,
+            products_with_increases  INTEGER DEFAULT 0,
+            products_with_decreases  INTEGER DEFAULT 0,
+            products_unchanged       INTEGER DEFAULT 0,
+            total_products_tracked   INTEGER DEFAULT 0,
+            computed_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_dashboard_brand_metrics_brand "
+        "ON dashboard_brand_metrics(brand)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_dashboard_brand_metrics_avg_change "
+        "ON dashboard_brand_metrics(avg_price_change_pct)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dashboard_bonus_metrics (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_by                 VARCHAR(20) NOT NULL,
+            group_key                VARCHAR(255) NOT NULL,
+            product_count            INTEGER DEFAULT 0,
+            bonus_count              INTEGER DEFAULT 0,
+            bonus_share_pct          FLOAT,
+            avg_discount_depth_pct   FLOAT,
+            max_discount_depth_pct   FLOAT,
+            computed_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_dashboard_bonus_metrics_group "
+        "ON dashboard_bonus_metrics(group_by, group_key)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_dashboard_bonus_metrics_bonus_count "
+        "ON dashboard_bonus_metrics(bonus_count)"
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "add raw_json.sub_source column", _m001_add_raw_json_sub_source),
     (2, "add product extra detail columns", _m002_add_product_extra_columns),
     (3, "allergen level normalization marker", _m003_add_allergen_level_column),
     (4, "add price_history dedupe index", _m004_add_price_history_dedupe_index),
     (5, "add unit prices and price metrics", _m005_add_unit_prices_and_price_metrics),
+    (6, "add dashboard serving metric tables", _m006_add_dashboard_serving_tables),
 ]
 
 

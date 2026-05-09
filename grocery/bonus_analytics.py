@@ -16,7 +16,7 @@ GroupBy = Literal["brand", "product"]
 def compute_bonus_analytics(
     session: Session,
     group_by: GroupBy = "brand",
-    limit: int = 20,
+    limit: int | None = 20,
 ) -> dict:
     """Compute active promotion frequency and discount depth.
 
@@ -44,7 +44,7 @@ def compute_bonus_analytics(
     )
     bonus_discount_pct = case((valid_discount, discount_pct), else_=None)
 
-    rows = (
+    query = (
         session.query(
             group_col,
             func.count(ProductRow.webshop_id),
@@ -55,9 +55,10 @@ def compute_bonus_analytics(
         .filter(group_col.isnot(None))
         .group_by(group_col)
         .order_by(func.sum(bonus_flag).desc())
-        .limit(limit)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows = query.all()
 
     return {
         "groupBy": group_by,

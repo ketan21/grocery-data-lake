@@ -83,6 +83,12 @@ grocery query bonus-analytics
 
 # Operational health
 grocery query health
+
+# Rebuild derived and dashboard-ready serving tables
+grocery jobs rebuild-derived
+
+# Full daily orchestration: scrape, rebuild, health checks
+grocery jobs daily-snapshot
 ```
 
 ### Serving the API
@@ -123,6 +129,9 @@ grocery/
 | `price_history` | Price snapshots per scrape run |
 | `unit_prices` | Normalized per-unit prices parsed from AH unit price descriptions |
 | `price_metrics` | Aggregated cheapest, most expensive, average, and volatility metrics |
+| `dashboard_category_metrics` | Materialized category metrics for dashboards |
+| `dashboard_brand_metrics` | Materialized brand metrics for dashboards |
+| `dashboard_bonus_metrics` | Materialized promotion metrics for dashboards |
 | `scrape_runs` | Scrape run metadata |
 | `raw_json` | Raw API responses for debugging |
 
@@ -150,6 +159,9 @@ grocery/
 | `GET /api/analytics/category-inflation` | Category price change metrics |
 | `GET /api/analytics/brand-inflation` | Brand price change metrics |
 | `GET /api/analytics/bonus` | Promotion frequency and discount-depth metrics |
+| `GET /api/analytics/serving/category-metrics` | Materialized category dashboard metrics |
+| `GET /api/analytics/serving/brand-metrics` | Materialized brand dashboard metrics |
+| `GET /api/analytics/serving/bonus-metrics` | Materialized promotion dashboard metrics |
 
 ## Rate Limiting
 

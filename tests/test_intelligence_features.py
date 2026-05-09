@@ -150,6 +150,54 @@ def test_health_quality_checks_are_testable(tmp_path, monkeypatch) -> None:
     assert all(check.passed for check in checks)
 
 
+def test_serving_metrics_are_materialized_and_exposed(tmp_path, monkeypatch) -> None:
+    from grocery import db
+    from grocery.api.app import create_app
+    from grocery.serving import refresh_serving_metrics
+
+    monkeypatch.setattr(db, "DB_DIR", tmp_path)
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "serving.db")
+    db.init_db()
+
+    session = db.get_session()
+    session.add(
+        db.ProductRow(
+            webshop_id=1,
+            title="Bonus Milk",
+            brand="AH",
+            main_category="Zuivel",
+            current_price=1.00,
+            price_before_bonus=2.00,
+            is_bonus=True,
+        )
+    )
+    session.add_all(
+        [
+            db.PriceHistoryRow(
+                product_id=1,
+                recorded_at=datetime(2026, 5, 1, 9, 0),
+                current_price=2.00,
+            ),
+            db.PriceHistoryRow(
+                product_id=1,
+                recorded_at=datetime(2026, 5, 2, 9, 0),
+                current_price=1.00,
+            ),
+        ]
+    )
+    counts = refresh_serving_metrics(session)
+    session.commit()
+
+    assert counts["categoryMetrics"] == 1
+    assert counts["brandMetrics"] == 1
+    assert counts["bonusMetrics"] == 2
+
+    client = TestClient(create_app())
+    assert client.get("/api/analytics/serving/category-metrics").json()["categories"][0]["category"] == "Zuivel"
+    assert client.get("/api/analytics/serving/brand-metrics").json()["brands"][0]["brand"] == "AH"
+    assert client.get("/api/analytics/serving/bonus-metrics?group_by=brand").json()["items"][0]["groupKey"] == "AH"
+
+
 def test_new_query_commands_are_registered() -> None:
     from grocery.cli import main
 
@@ -169,3 +217,4 @@ def test_jobs_command_is_registered() -> None:
 
     assert result.exit_code == 0
     assert "rebuild-derived" in result.stdout
+    assert "daily-snapshot" in result.stdout
