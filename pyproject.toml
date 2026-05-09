@@ -26,3 +26,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["grocery*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["stale", ".*", "build", "dist", "*.egg-info"]
