@@ -13,6 +13,7 @@ from .db import (
     DashboardBrandMetricRow,
     DashboardCategoryMetricRow,
 )
+from .intelligence import compute_all_intelligence
 
 
 def refresh_serving_metrics(session: Session) -> dict[str, int]:
@@ -76,4 +77,5 @@ def refresh_serving_metrics(session: Session) -> dict[str, int]:
         "categoryMetrics": category_rows,
         "brandMetrics": brand_rows,
         "bonusMetrics": bonus_rows,
+        **compute_all_intelligence(session),
     }

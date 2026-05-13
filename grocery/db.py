@@ -276,6 +276,107 @@ class RawJson(Base):
     )
 
 
+class CategoryPriceRankingRow(Base):
+    """Ranking of products within categories by various criteria."""
+    __tablename__ = "analytics_category_price_rankings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    main_category = Column(String(255), nullable=False)
+    sub_category = Column(String(255))
+    ranking_type = Column(String(50), nullable=False)
+    product_id = Column(Integer, nullable=False)
+    product_title = Column(String(500))
+    brand = Column(String(255))
+    current_price = Column(Float)
+    unit_price = Column(Float)
+    base_unit = Column(String(20))
+    rank = Column(Integer, nullable=False)
+    product_count = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_cat_rank_type", "ranking_type", "main_category", "rank"),
+    )
+
+
+class DealQualityScoreRow(Base):
+    """Deal quality scoring for promoted products."""
+    __tablename__ = "analytics_deal_quality_scores"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    current_price = Column(Float)
+    price_before_bonus = Column(Float)
+    discount_pct = Column(Float)
+    avg_price = Column(Float)
+    historical_low_price = Column(Float)
+    current_vs_avg_pct = Column(Float)
+    current_vs_low_pct = Column(Float)
+    price_volatility = Column(Float)
+    deal_score = Column(Float)
+    deal_label = Column(String(50))
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_deal_score", "deal_score", unique=False),
+    )
+
+
+class NutritionScoreRow(Base):
+    """Nutrition scoring per product."""
+    __tablename__ = "analytics_nutrition_scores"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    calories_per_100g = Column(Float)
+    sugar_per_100g = Column(Float)
+    salt_per_100g = Column(Float)
+    saturated_fat_per_100g = Column(Float)
+    protein_per_100g = Column(Float)
+    fiber_per_100g = Column(Float)
+    nutriscore = Column(String(10))
+    health_score = Column(Float)
+    protein_per_euro = Column(Float)
+    fiber_per_euro = Column(Float)
+    sugar_risk_level = Column(String(20))
+    salt_risk_level = Column(String(20))
+    saturated_fat_risk_level = Column(String(20))
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_nutr_health_score", "health_score", unique=False),
+        Index("ux_nutr_product", "product_id", unique=True),
+    )
+
+
+class HealthValueRankingRow(Base):
+    """Health value index: healthy products ranked by affordability."""
+    __tablename__ = "analytics_health_value_rankings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    main_category = Column(String(255))
+    sub_category = Column(String(255))
+    current_price = Column(Float)
+    unit_price = Column(Float)
+    health_score = Column(Float)
+    health_value_score = Column(Float)
+    protein_per_euro = Column(Float)
+    fiber_per_euro = Column(Float)
+    rank_in_category = Column(Integer)
+    rank_in_subcategory = Column(Integer)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_hv_rank_cat", "main_category", "rank_in_category"),
+        Index("ix_hv_score", "health_value_score", unique=False),
+    )
+
+
 def get_engine():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)

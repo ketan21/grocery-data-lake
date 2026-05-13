@@ -263,6 +263,133 @@ def _m006_add_dashboard_serving_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _m007_add_category_price_rankings(conn: sqlite3.Connection) -> None:
+    """Create analytics_category_price_rankings table (v7)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_category_price_rankings (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            main_category       VARCHAR(255) NOT NULL,
+            sub_category        VARCHAR(255),
+            ranking_type        VARCHAR(50) NOT NULL,
+            product_id          INTEGER NOT NULL,
+            product_title       VARCHAR(500),
+            brand               VARCHAR(255),
+            current_price       FLOAT,
+            unit_price          FLOAT,
+            base_unit           VARCHAR(20),
+            rank                INTEGER NOT NULL,
+            product_count       INTEGER DEFAULT 0,
+            computed_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id       INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_cat_rank_type "
+        "ON analytics_category_price_rankings(ranking_type, main_category, rank)"
+    )
+    conn.commit()
+
+
+def _m008_add_deal_quality_scores(conn: sqlite3.Connection) -> None:
+    """Create analytics_deal_quality_scores table (v8)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_deal_quality_scores (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id              INTEGER NOT NULL,
+            current_price           FLOAT,
+            price_before_bonus      FLOAT,
+            discount_pct            FLOAT,
+            avg_price               FLOAT,
+            historical_low_price    FLOAT,
+            current_vs_avg_pct      FLOAT,
+            current_vs_low_pct      FLOAT,
+            price_volatility        FLOAT,
+            deal_score              FLOAT,
+            deal_label              VARCHAR(50),
+            computed_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id           INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_deal_score "
+        "ON analytics_deal_quality_scores(deal_score DESC)"
+    )
+    conn.commit()
+
+
+def _m009_add_nutrition_scores(conn: sqlite3.Connection) -> None:
+    """Create analytics_nutrition_scores table (v9)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_nutrition_scores (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id                  INTEGER NOT NULL,
+            calories_per_100g           FLOAT,
+            sugar_per_100g              FLOAT,
+            salt_per_100g               FLOAT,
+            saturated_fat_per_100g      FLOAT,
+            protein_per_100g            FLOAT,
+            fiber_per_100g              FLOAT,
+            nutriscore                  VARCHAR(10),
+            health_score                FLOAT,
+            protein_per_euro            FLOAT,
+            fiber_per_euro              FLOAT,
+            sugar_risk_level            VARCHAR(20),
+            salt_risk_level             VARCHAR(20),
+            saturated_fat_risk_level    VARCHAR(20),
+            computed_at                 DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id               INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_nutr_health_score "
+        "ON analytics_nutrition_scores(health_score DESC)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_nutr_product "
+        "ON analytics_nutrition_scores(product_id)"
+    )
+    conn.commit()
+
+
+def _m010_add_health_value_rankings(conn: sqlite3.Connection) -> None:
+    """Create analytics_health_value_rankings table (v10)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_health_value_rankings (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id              INTEGER NOT NULL,
+            main_category           VARCHAR(255),
+            sub_category            VARCHAR(255),
+            current_price           FLOAT,
+            unit_price              FLOAT,
+            health_score            FLOAT,
+            health_value_score      FLOAT,
+            protein_per_euro        FLOAT,
+            fiber_per_euro          FLOAT,
+            rank_in_category        INTEGER,
+            rank_in_subcategory     INTEGER,
+            computed_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id           INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_hv_rank_cat "
+        "ON analytics_health_value_rankings(main_category, rank_in_category)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_hv_score "
+        "ON analytics_health_value_rankings(health_value_score DESC)"
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "add raw_json.sub_source column", _m001_add_raw_json_sub_source),
     (2, "add product extra detail columns", _m002_add_product_extra_columns),
@@ -270,6 +397,10 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (4, "add price_history dedupe index", _m004_add_price_history_dedupe_index),
     (5, "add unit prices and price metrics", _m005_add_unit_prices_and_price_metrics),
     (6, "add dashboard serving metric tables", _m006_add_dashboard_serving_tables),
+    (7, "add category price rankings", _m007_add_category_price_rankings),
+    (8, "add deal quality scores", _m008_add_deal_quality_scores),
+    (9, "add nutrition scores", _m009_add_nutrition_scores),
+    (10, "add health value rankings", _m010_add_health_value_rankings),
 ]
 
 

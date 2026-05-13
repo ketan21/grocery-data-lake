@@ -14,6 +14,7 @@ from ..client import AHClient
 from ..config import DB_PATH
 from ..db import get_session, init_db
 from ..health import run_quality_checks
+from ..intelligence import compute_all_intelligence
 from ..scraper import scrape_full_catalog
 from ..serving import refresh_serving_metrics
 from ..unit_price import normalize_unit_prices
