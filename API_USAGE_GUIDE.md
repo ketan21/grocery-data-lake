@@ -169,6 +169,8 @@ Run full scrape, rebuild derived tables, rebuild serving tables, and run health 
 grocery jobs daily-snapshot
 ```
 
+This creates a pre-run database backup in `data/backups/`. If the scrape or quality checks fail, the job restores that backup automatically so partial failed scrape data does not affect the existing database.
+
 Run the same workflow without scraping:
 
 ```bash
@@ -184,4 +186,3 @@ If `http://192.168.0.15:8000/docs` does not open:
 3. Confirm the Mac is still `192.168.0.15`.
 4. Check whether macOS firewall is blocking inbound connections.
 5. Try a different forwarded port, such as `18000`.
-

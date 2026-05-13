@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grocery Data Lake Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --card: #1a1d23;
+      --card-2: #20242c;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --border: #30363d;
+      --up: #f85149;
+      --down: #3fb950;
+      --accent: #58a6ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1680px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .subhead {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .pill,
+    .tool-input,
+    .tool-select {
+      min-height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card);
+      color: var(--text);
+      padding: 8px 11px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+
+    .card {
+      min-height: 310px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      overflow: hidden;
+    }
+
+    .card.wide {
+      grid-column: span 8;
+    }
+
+    .card.medium {
+      grid-column: span 6;
+    }
+
+    .card.small {
+      grid-column: span 4;
+    }
+
+    .card.full {
+      grid-column: 1 / -1;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .metric {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .chart {
+      width: 100%;
+      height: 252px;
+      position: relative;
+    }
+
+    .chart.tall {
+      height: 360px;
+    }
+
+    .feed {
+      height: 360px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .feed-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .feed-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .feed-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 3px;
+    }
+
+    .price {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      text-align: right;
+    }
+
+    .positive {
+      color: var(--up);
+    }
+
+    .negative {
+      color: var(--down);
+    }
+
+    .tooltip {
+      pointer-events: none;
+      position: fixed;
+      z-index: 10;
+      max-width: 280px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #11161d;
+      color: var(--text);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+      font-size: 12px;
+      opacity: 0;
+      transform: translate(-50%, -110%);
+    }
+
+    .empty {
+      display: grid;
+      place-items: center;
+      height: 100%;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .axis path,
+    .axis line {
+      stroke: var(--border);
+    }
+
+    .axis text {
+      fill: var(--muted);
+      font-size: 11px;
+    }
+
+    .label {
+      fill: var(--text);
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    .muted-label {
+      fill: var(--muted);
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    .clickable {
+      cursor: pointer;
+    }
+
+    @media (max-width: 1100px) {
+      .card.wide,
+      .card.medium,
+      .card.small {
+        grid-column: span 6;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100vw - 20px, 680px);
+        padding-top: 16px;
+      }
+
+      header {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+      }
+
+      .card.wide,
+      .card.medium,
+      .card.small,
+      .card.full {
+        grid-column: 1 / -1;
+      }
+
+      .chart,
+      .chart.tall,
+      .feed {
+        height: 300px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <h1>Grocery Data Lake</h1>
+        <p class="subhead" id="status">Loading dashboard data...</p>
+      </div>
+      <div class="toolbar">
+        <input class="tool-input" id="search" type="search" placeholder="Search products">
+        <select class="tool-select" id="unit">
+          <option value="g">€/g</option>
+          <option value="ml">€/ml</option>
+        </select>
+        <button class="pill" id="clearFilter" type="button">All categories</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card wide">
+        <div class="card-head">
+          <h2>Price Change Heatmap</h2>
+          <span class="metric" id="heatmapMetric"></span>
+        </div>
+        <div class="chart" id="heatmap"></div>
+      </section>
+
+      <section class="card small">
+        <div class="card-head">
+          <h2>Catalog Sunburst</h2>
+          <span class="metric" id="sunburstMetric"></span>
+        </div>
+        <div class="chart" id="sunburst"></div>
+      </section>
+
+      <section class="card medium">
+        <div class="card-head">
+          <h2>Average Price Timeline</h2>
+          <span class="metric" id="timelineMetric"></span>
+        </div>
+        <div class="chart" id="timeline"></div>
+      </section>
+
+      <section class="card medium">
+        <div class="card-head">
+          <h2>Brand Dominance</h2>
+          <span class="metric" id="treemapMetric"></span>
+        </div>
+        <div class="chart" id="treemap"></div>
+      </section>
+
+      <section class="card medium">
+        <div class="card-head">
+          <h2>Volatility Scatter</h2>
+          <span class="metric" id="scatterMetric"></span>
+        </div>
+        <div class="chart" id="scatter"></div>
+      </section>
+
+      <section class="card medium">
+        <div class="card-head">
+          <h2>Cheapest Unit Prices</h2>
+          <span class="metric" id="barMetric"></span>
+        </div>
+        <div class="chart" id="unitBars"></div>
+      </section>
+
+      <section class="card small">
+        <div class="card-head">
+          <h2>Bonus Radar</h2>
+          <span class="metric" id="radarMetric"></span>
+        </div>
+        <div class="chart" id="radar"></div>
+      </section>
+
+      <section class="card wide">
+        <div class="card-head">
+          <h2>Latest Price Changes</h2>
+          <span class="metric" id="feedMetric"></span>
+        </div>
+        <div class="feed" id="feed"></div>
+      </section>
+    </main>
+  </div>
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    const API_BASE = location.protocol === "file:" ? "http://localhost:8000/api/viz" : "/api/viz";
+    const refreshMs = 5 * 60 * 1000;
+    const fmtEuro = new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" });
+    const fmtPct = new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 1, minimumFractionDigits: 0 });
+    const color = d3.scaleOrdinal(d3.schemeTableau10.concat(d3.schemeSet3));
+    const tooltip = d3.select("#tooltip");
+
+    const state = {
+      selectedCategory: null,
+      search: "",
+      unit: "g",
+      data: null
+    };
+
+    const endpoints = {
+      categories: "/categories",
+      brands: "/brands?limit=80",
+      distribution: "/price-distribution",
+      timeline: "/price-timeline",
+      changes: "/price-changes?limit=180",
+      unitPrices: () => `/unit-prices?unit=${encodeURIComponent(state.unit)}&limit=180`,
+      bonus: "/bonus-overview",
+      volatility: "/volatility"
+    };
+
+    function showTip(event, html) {
+      tooltip.html(html)
+        .style("left", `${event.clientX}px`)
+        .style("top", `${event.clientY}px`)
+        .transition().duration(120)
+        .style("opacity", 1);
+    }
+
+    function hideTip() {
+      tooltip.transition().duration(120).style("opacity", 0);
+    }
+
+    function chartBox(selector) {
+      const node = document.querySelector(selector);
+      const rect = node.getBoundingClientRect();
+      d3.select(node).selectAll("*").remove();
+      return { node, width: Math.max(260, rect.width), height: Math.max(220, rect.height) };
+    }
+
+    function setCategory(category) {
+      state.selectedCategory = state.selectedCategory === category ? null : category;
+      document.querySelector("#clearFilter").textContent = state.selectedCategory || "All categories";
+      renderAll();
+    }
+
+    function categoryFilter(items) {
+      if (!state.selectedCategory) return items;
+      return items.filter((item) => item.category === state.selectedCategory);
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(`${API_BASE}${typeof path === "function" ? path() : path}`);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return response.json();
+    }
+
+    async function loadData() {
+      const started = new Date();
+      document.querySelector("#status").textContent = "Refreshing dashboard data...";
+      const [categories, brands, distribution, timeline, changes, unitPrices, bonus, volatility] = await Promise.all([
+        fetchJson(endpoints.categories),
+        fetchJson(endpoints.brands),
+        fetchJson(endpoints.distribution),
+        fetchJson(endpoints.timeline),
+        fetchJson(endpoints.changes),
+        fetchJson(endpoints.unitPrices),
+        fetchJson(endpoints.bonus),
+        fetchJson(endpoints.volatility)
+      ]);
+
+      state.data = { categories, brands, distribution, timeline, changes, unitPrices, bonus, volatility };
+      const productTotal = d3.sum(categories.categories, (d) => d.productCount);
+      document.querySelector("#status").textContent = `${productTotal.toLocaleString("nl-NL")} products across ${categories.categories.length} categories. Updated ${started.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
+      renderAll();
+    }
+
+    function renderAll() {
+      if (!state.data) return;
+      color.domain(state.data.categories.categories.map((d) => d.category));
+      renderHeatmap();
+      renderTimeline();
+      renderTreemap();
+      renderScatter();
+      renderUnitBars();
+      renderSunburst();
+      renderRadar();
+      renderFeed();
+    }
+
+    function renderHeatmap() {
+      const { width, height } = chartBox("#heatmap");
+      const margin = { top: 12, right: 12, bottom: 38, left: 120 };
+      const svg = d3.select("#heatmap").append("svg");
+      const points = state.data.timeline.points;
+      const runs = Array.from(new Set(points.map((d) => d.runId))).filter(Boolean).sort((a, b) => a - b);
+      const categories = categoryFilter(state.data.categories.categories).slice(0, state.selectedCategory ? 1 : 14).map((d) => d.category);
+      const byKey = d3.rollup(points, (v) => d3.mean(v, (d) => d.avgPrice), (d) => d.category, (d) => d.runId);
+      const cells = [];
+      categories.forEach((category) => {
+        runs.forEach((runId, index) => {
+          const price = byKey.get(category)?.get(runId);
+          const previous = index > 0 ? byKey.get(category)?.get(runs[index - 1]) : null;
+          const change = price && previous ? ((price - previous) / previous) * 100 : 0;
+          cells.push({ category, runId, price, change });
+        });
+      });
+
+      if (!cells.length) return d3.select("#heatmap").html('<div class="empty">No timeline data</div>');
+
+      const x = d3.scaleBand().domain(runs).range([margin.left, width - margin.right]).padding(0.08);
+      const y = d3.scaleBand().domain(categories).range([margin.top, height - margin.bottom]).padding(0.08);
+      const intensity = d3.scaleDiverging([-5, 0, 5], ["#3fb950", "#30363d", "#f85149"]).clamp(true);
+
+      svg.append("g")
+        .selectAll("rect")
+        .data(cells)
+        .join("rect")
+        .attr("class", "clickable")
+        .attr("x", (d) => x(d.runId))
+        .attr("y", (d) => y(d.category))
+        .attr("width", x.bandwidth())
+        .attr("height", y.bandwidth())
+        .attr("rx", 3)
+        .attr("fill", (d) => intensity(d.change || 0))
+        .on("click", (_, d) => setCategory(d.category))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.category}</strong><br>Run ${d.runId}<br>${fmtPct.format(d.change || 0)}% change<br>${d.price ? fmtEuro.format(d.price) : "No price"}`))
+        .on("mouseleave", hideTip);
+
+      svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).tickFormat((d) => `R${d}`));
+      svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y));
+      document.querySelector("#heatmapMetric").textContent = `${categories.length} categories`;
+    }
+
+    function renderTimeline() {
+      const { width, height } = chartBox("#timeline");
+      const margin = { top: 14, right: 18, bottom: 34, left: 48 };
+      const svg = d3.select("#timeline").append("svg");
+      const points = state.data.timeline.points.filter((d) => !state.selectedCategory || d.category === state.selectedCategory);
+      const grouped = Array.from(d3.group(points, (d) => d.category), ([category, values]) => ({ category, values: values.sort((a, b) => d3.ascending(a.runId, b.runId)) }))
+        .sort((a, b) => d3.descending(d3.mean(a.values, (d) => d.avgPrice), d3.mean(b.values, (d) => d.avgPrice)))
+        .slice(0, state.selectedCategory ? 1 : 8);
+      const flat = grouped.flatMap((d) => d.values);
+      if (!flat.length) return d3.select("#timeline").html('<div class="empty">No price timeline</div>');
+
+      const x = d3.scaleLinear().domain(d3.extent(flat, (d) => d.runId)).range([margin.left, width - margin.right]);
+      const y = d3.scaleLinear().domain(d3.extent(flat, (d) => d.avgPrice)).nice().range([height - margin.bottom, margin.top]);
+      const line = d3.line().x((d) => x(d.runId)).y((d) => y(d.avgPrice)).curve(d3.curveMonotoneX);
+
+      svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(6).tickFormat((d) => `R${d}`));
+      svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5).tickFormat((d) => `€${d}`));
+
+      svg.selectAll("path.series")
+        .data(grouped)
+        .join("path")
+        .attr("class", "series clickable")
+        .attr("fill", "none")
+        .attr("stroke", (d) => color(d.category))
+        .attr("stroke-width", state.selectedCategory ? 3 : 2)
+        .attr("d", (d) => line(d.values))
+        .on("click", (_, d) => setCategory(d.category))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.category}</strong><br>${d.values.length} runs<br>Avg ${fmtEuro.format(d3.mean(d.values, (p) => p.avgPrice))}`))
+        .on("mouseleave", hideTip);
+
+      svg.selectAll("text.series-label")
+        .data(grouped)
+        .join("text")
+        .attr("class", "muted-label")
+        .attr("x", (d) => x(d.values.at(-1).runId) + 5)
+        .attr("y", (d) => y(d.values.at(-1).avgPrice))
+        .text((d) => d.category.slice(0, 18));
+
+      document.querySelector("#timelineMetric").textContent = `${grouped.length} series`;
+    }
+
+    function renderTreemap() {
+      const { width, height } = chartBox("#treemap");
+      const svg = d3.select("#treemap").append("svg");
+      const brands = state.data.brands.brands.slice(0, 45);
+      const root = d3.hierarchy({ name: "brands", children: brands.map((d) => ({ name: d.brand, value: d.productCount, data: d })) }).sum((d) => d.value || 0);
+      d3.treemap().size([width, height]).paddingOuter(2).paddingInner(2).round(true)(root);
+
+      const cells = svg.selectAll("g")
+        .data(root.leaves())
+        .join("g")
+        .attr("transform", (d) => `translate(${d.x0},${d.y0})`);
+
+      cells.append("rect")
+        .attr("class", "clickable")
+        .attr("width", (d) => Math.max(0, d.x1 - d.x0))
+        .attr("height", (d) => Math.max(0, d.y1 - d.y0))
+        .attr("rx", 5)
+        .attr("fill", (_, i) => d3.schemeTableau10[i % 10])
+        .attr("opacity", 0.82)
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.data.name}</strong><br>${d.data.value.toLocaleString("nl-NL")} products<br>Avg ${fmtEuro.format(d.data.data.avgPrice || 0)}`))
+        .on("mouseleave", hideTip);
+
+      cells.append("text")
+        .attr("class", "label")
+        .attr("x", 7)
+        .attr("y", 17)
+        .text((d) => (d.x1 - d.x0 > 58 && d.y1 - d.y0 > 26 ? d.data.name.slice(0, 20) : ""));
+
+      document.querySelector("#treemapMetric").textContent = `${brands.length} brands`;
+    }
+
+    function renderScatter() {
+      const { width, height } = chartBox("#scatter");
+      const margin = { top: 14, right: 18, bottom: 38, left: 50 };
+      const svg = d3.select("#scatter").append("svg");
+      const products = categoryFilter(state.data.volatility.products).slice(0, 180);
+      if (!products.length) return d3.select("#scatter").html('<div class="empty">No volatility metrics</div>');
+
+      const x = d3.scaleLinear().domain(d3.extent(products, (d) => d.avgPrice || d.currentPrice || 0)).nice().range([margin.left, width - margin.right]);
+      const y = d3.scaleLinear().domain(d3.extent(products, (d) => d.volatility || 0)).nice().range([height - margin.bottom, margin.top]);
+      const r = d3.scaleSqrt().domain(d3.extent(products, (d) => d.totalChanges || 0)).range([3, 12]);
+
+      svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5).tickFormat((d) => `€${d}`));
+      svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5));
+
+      svg.selectAll("circle")
+        .data(products)
+        .join("circle")
+        .attr("class", "clickable")
+        .attr("cx", (d) => x(d.avgPrice || d.currentPrice || 0))
+        .attr("cy", (d) => y(d.volatility || 0))
+        .attr("r", (d) => r(d.totalChanges || 0))
+        .attr("fill", (d) => color(d.category))
+        .attr("opacity", 0.72)
+        .on("click", (_, d) => setCategory(d.category))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.name}</strong><br>${d.category}<br>Volatility ${d.volatility}<br>${d.totalChanges} changes`))
+        .on("mouseleave", hideTip);
+
+      document.querySelector("#scatterMetric").textContent = `${products.length} products`;
+    }
+
+    function renderUnitBars() {
+      const { width, height } = chartBox("#unitBars");
+      const margin = { top: 10, right: 18, bottom: 32, left: 136 };
+      const svg = d3.select("#unitBars").append("svg");
+      const products = categoryFilter(state.data.unitPrices.products).slice(0, 12);
+      if (!products.length) return d3.select("#unitBars").html('<div class="empty">No unit prices</div>');
+
+      const x = d3.scaleLinear().domain([0, d3.max(products, (d) => d.unitPrice)]).nice().range([margin.left, width - margin.right]);
+      const y = d3.scaleBand().domain(products.map((d) => d.name)).range([margin.top, height - margin.bottom]).padding(0.18);
+
+      svg.append("g").attr("class", "axis").attr("transform", `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5));
+      svg.append("g").attr("class", "axis").attr("transform", `translate(${margin.left},0)`).call(d3.axisLeft(y).tickFormat((d) => d.length > 18 ? `${d.slice(0, 18)}...` : d));
+
+      svg.selectAll("rect")
+        .data(products)
+        .join("rect")
+        .attr("class", "clickable")
+        .attr("x", margin.left)
+        .attr("y", (d) => y(d.name))
+        .attr("width", (d) => Math.max(1, x(d.unitPrice) - margin.left))
+        .attr("height", y.bandwidth())
+        .attr("rx", 4)
+        .attr("fill", (d) => color(d.category))
+        .on("click", (_, d) => setCategory(d.category))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.name}</strong><br>${d.category}<br>${d.unitPrice} per ${d.baseUnit}<br>${fmtEuro.format(d.currentPrice || 0)}`))
+        .on("mouseleave", hideTip);
+
+      document.querySelector("#barMetric").textContent = `${state.unit}`;
+    }
+
+    function renderSunburst() {
+      const { width, height } = chartBox("#sunburst");
+      const svg = d3.select("#sunburst").append("svg").attr("viewBox", [-width / 2, -height / 2, width, height]);
+      const radius = Math.min(width, height) / 2 - 8;
+      const categories = state.data.categories.categories.slice(0, 18);
+      const root = d3.hierarchy({
+        name: "catalog",
+        children: categories.map((d) => ({
+          name: d.category,
+          category: d.category,
+          children: [
+            { name: "Bonus", category: d.category, value: d.bonusCount || 0 },
+            { name: "Shelf", category: d.category, value: Math.max(0, d.productCount - (d.bonusCount || 0)) }
+          ]
+        }))
+      }).sum((d) => d.value || 0);
+
+      d3.partition().size([2 * Math.PI, radius])(root);
+      const arc = d3.arc().startAngle((d) => d.x0).endAngle((d) => d.x1).innerRadius((d) => d.y0).outerRadius((d) => d.y1 - 1);
+
+      svg.selectAll("path")
+        .data(root.descendants().filter((d) => d.depth))
+        .join("path")
+        .attr("class", "clickable")
+        .attr("fill", (d) => color(d.data.category || d.data.name))
+        .attr("opacity", (d) => d.depth === 1 ? 0.9 : 0.58)
+        .attr("d", arc)
+        .on("click", (_, d) => setCategory(d.data.category || d.data.name))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.data.name}</strong><br>${(d.value || 0).toLocaleString("nl-NL")} products`))
+        .on("mouseleave", hideTip);
+
+      svg.append("text")
+        .attr("class", "label")
+        .attr("text-anchor", "middle")
+        .attr("dy", "-0.2em")
+        .style("font-size", "15px")
+        .text(state.selectedCategory || "Catalog");
+      svg.append("text")
+        .attr("class", "muted-label")
+        .attr("text-anchor", "middle")
+        .attr("dy", "1.2em")
+        .text(`${d3.sum(categories, (d) => d.productCount).toLocaleString("nl-NL")} products`);
+      document.querySelector("#sunburstMetric").textContent = `${categories.length} categories`;
+    }
+
+    function renderRadar() {
+      const { width, height } = chartBox("#radar");
+      const svg = d3.select("#radar").append("svg").attr("viewBox", [-width / 2, -height / 2, width, height]);
+      const radius = Math.min(width, height) / 2 - 34;
+      const items = categoryFilter(state.data.bonus.categories).sort((a, b) => d3.descending(a.bonusSharePct, b.bonusSharePct)).slice(0, state.selectedCategory ? 1 : 8);
+      if (!items.length) return d3.select("#radar").html('<div class="empty">No bonus data</div>');
+      const maxValue = Math.max(1, d3.max(items, (d) => d.bonusSharePct || 0));
+      const angle = d3.scalePoint().domain(items.map((d) => d.category)).range([0, 2 * Math.PI]).padding(0.5);
+      const radial = d3.scaleLinear().domain([0, maxValue]).range([0, radius]);
+      const radarLine = d3.lineRadial()
+        .angle((d) => angle(d.category))
+        .radius((d) => radial(d.bonusSharePct || 0))
+        .curve(d3.curveLinearClosed);
+
+      [0.25, 0.5, 0.75, 1].forEach((tick) => {
+        svg.append("circle").attr("r", radius * tick).attr("fill", "none").attr("stroke", "#30363d");
+      });
+
+      items.forEach((d) => {
+        const a = angle(d.category) - Math.PI / 2;
+        svg.append("line")
+          .attr("x1", 0).attr("y1", 0)
+          .attr("x2", Math.cos(a) * radius)
+          .attr("y2", Math.sin(a) * radius)
+          .attr("stroke", "#30363d");
+        svg.append("text")
+          .attr("class", "muted-label")
+          .attr("text-anchor", "middle")
+          .attr("x", Math.cos(a) * (radius + 22))
+          .attr("y", Math.sin(a) * (radius + 22))
+          .text(d.category.slice(0, 10));
+      });
+
+      svg.append("path")
+        .datum(items)
+        .attr("fill", "rgba(88, 166, 255, 0.28)")
+        .attr("stroke", "var(--accent)")
+        .attr("stroke-width", 2)
+        .attr("d", radarLine);
+
+      svg.selectAll("circle.point")
+        .data(items)
+        .join("circle")
+        .attr("class", "point clickable")
+        .attr("cx", (d) => Math.cos(angle(d.category) - Math.PI / 2) * radial(d.bonusSharePct || 0))
+        .attr("cy", (d) => Math.sin(angle(d.category) - Math.PI / 2) * radial(d.bonusSharePct || 0))
+        .attr("r", 4)
+        .attr("fill", (d) => color(d.category))
+        .on("click", (_, d) => setCategory(d.category))
+        .on("mousemove", (event, d) => showTip(event, `<strong>${d.category}</strong><br>${fmtPct.format(d.bonusSharePct || 0)}% on bonus<br>${fmtPct.format(d.avgDiscountPct || 0)}% avg discount`))
+        .on("mouseleave", hideTip);
+
+      document.querySelector("#radarMetric").textContent = `${items.length} categories`;
+    }
+
+    function renderFeed() {
+      const rows = categoryFilter(state.data.changes.changes)
+        .filter((d) => !state.search || `${d.name} ${d.brand} ${d.category}`.toLowerCase().includes(state.search.toLowerCase()))
+        .slice(0, 60);
+      const feed = d3.select("#feed");
+      feed.selectAll("*").remove();
+
+      if (!rows.length) {
+        feed.html('<div class="empty">No matching price changes</div>');
+        return;
+      }
+
+      const item = feed.selectAll("div.feed-row")
+        .data(rows, (d) => d.productId)
+        .join("div")
+        .attr("class", "feed-row");
+
+      const left = item.append("div");
+      left.append("div").attr("class", "feed-name").text((d) => d.name);
+      left.append("div").attr("class", "feed-meta").text((d) => `${d.brand || "Unknown"} · ${d.category} · ${d.isBonus ? "bonus" : "shelf"}`);
+
+      const right = item.append("div").attr("class", "price");
+      right.append("div")
+        .attr("class", (d) => d.priceChange > 0 ? "positive" : "negative")
+        .text((d) => `${d.priceChange > 0 ? "+" : ""}${fmtPct.format(d.priceChangePct || 0)}%`);
+      right.append("div")
+        .attr("class", "feed-meta")
+        .text((d) => `${fmtEuro.format(d.previousPrice || 0)} → ${fmtEuro.format(d.currentPrice || 0)}`);
+
+      document.querySelector("#feedMetric").textContent = `${rows.length} changes`;
+    }
+
+    document.querySelector("#clearFilter").addEventListener("click", () => {
+      state.selectedCategory = null;
+      document.querySelector("#clearFilter").textContent = "All categories";
+      renderAll();
+    });
+
+    document.querySelector("#search").addEventListener("input", (event) => {
+      state.search = event.target.value.trim();
+      renderFeed();
+    });
+
+    document.querySelector("#unit").addEventListener("change", async (event) => {
+      state.unit = event.target.value;
+      state.data.unitPrices = await fetchJson(endpoints.unitPrices);
+      renderUnitBars();
+    });
+
+    window.addEventListener("resize", () => renderAll());
+
+    loadData().catch((error) => {
+      document.querySelector("#status").textContent = `Dashboard failed to load: ${error.message}`;
+    });
+    setInterval(() => loadData().catch(console.error), refreshMs);
+  </script>
+</body>
+</html>

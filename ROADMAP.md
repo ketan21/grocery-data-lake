@@ -82,7 +82,8 @@ Current local database baseline:
 - [x] Backup guidance before scrape and enrichment runs documented
 - [x] Health check CLI command: `grocery query health`
 - [x] Derived rebuild job: `grocery jobs rebuild-derived`
-- [x] Daily orchestration job: `grocery jobs daily-snapshot`
+- [x] Safe daily orchestration job: `grocery jobs daily-snapshot`
+- [x] Daily job creates a pre-run database backup and restores it automatically on scrape/quality-check failure
 - [x] Recovery workflow for interrupted scrapes documented
 
 ## Acceptance Criteria
@@ -101,7 +102,7 @@ Current local database baseline:
 
 ## Verified Checks
 
-- `pytest -q` -> 13 passed
+- `pytest -q` -> 15 passed
 - `grocery query stats` -> works
 - `grocery query price-history` -> works
 - `grocery query cheapest-unit g --limit 3` -> works

@@ -218,3 +218,52 @@ def test_jobs_command_is_registered() -> None:
     assert result.exit_code == 0
     assert "rebuild-derived" in result.stdout
     assert "daily-snapshot" in result.stdout
+
+
+def test_database_backup_restore_helpers(tmp_path) -> None:
+    from grocery.cli.jobs import create_database_backup, restore_database_backup
+
+    db_path = tmp_path / "grocery.db"
+    db_path.write_text("before")
+
+    backup_path = create_database_backup(db_path)
+    assert backup_path is not None
+
+    db_path.write_text("after")
+    restore_database_backup(backup_path, db_path)
+
+    assert db_path.read_text() == "before"
+
+
+def test_daily_snapshot_restores_backup_on_scrape_failure(tmp_path, monkeypatch) -> None:
+    from grocery import db
+    from grocery.cli import main
+    from grocery.cli import jobs
+
+    monkeypatch.setattr(db, "DB_DIR", tmp_path)
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "safe.db")
+    monkeypatch.setattr(jobs, "DB_PATH", tmp_path / "safe.db")
+    db.init_db()
+
+    session = db.get_session()
+    session.add(db.ProductRow(webshop_id=1, title="Original", current_price=1.0))
+    session.commit()
+    session.close()
+
+    def failing_scrape(*args, **kwargs):
+        partial_session = db.get_session()
+        partial_session.add(db.ProductRow(webshop_id=2, title="Partial", current_price=2.0))
+        partial_session.commit()
+        partial_session.close()
+        raise RuntimeError("simulated scrape failure")
+
+    monkeypatch.setattr(jobs, "scrape_full_catalog", failing_scrape)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["jobs", "daily-snapshot"])
+
+    assert result.exit_code != 0
+
+    verify_session = db.get_session()
+    products = verify_session.query(db.ProductRow).order_by(db.ProductRow.webshop_id).all()
+    assert [(product.webshop_id, product.title) for product in products] == [(1, "Original")]

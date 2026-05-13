@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from ..db import init_db
-from . import products, categories, stats, price_history, raw_json, bonus, analytics
+from . import analytics, bonus, categories, price_history, products, raw_json, stats, viz
 
 def create_app() -> FastAPI:
     init_db()
@@ -23,5 +26,10 @@ def create_app() -> FastAPI:
     app.include_router(raw_json.router, tags=["raw-json"])
     app.include_router(bonus.router, tags=["bonus"])
     app.include_router(analytics.router)
+    app.include_router(viz.router, prefix="/api")
+
+    dashboard_dir = Path(__file__).resolve().parents[2] / "dashboard"
+    if dashboard_dir.exists():
+        app.mount("/dashboard", StaticFiles(directory=dashboard_dir, html=True), name="dashboard")
 
     return app

@@ -87,7 +87,7 @@ grocery query health
 # Rebuild derived and dashboard-ready serving tables
 grocery jobs rebuild-derived
 
-# Full daily orchestration: scrape, rebuild, health checks
+# Full daily orchestration: backup, scrape, rebuild, health checks
 grocery jobs daily-snapshot
 ```
 
@@ -201,3 +201,11 @@ Then rerun the same command. Product upserts and price-history dedupe make rerun
 grocery query normalize-unit-prices
 grocery query compute-price-metrics
 ```
+
+The safer daily workflow does this automatically:
+
+```bash
+grocery jobs daily-snapshot
+```
+
+It creates a pre-run backup in `data/backups/`, runs the scrape, rebuilds derived and dashboard serving tables, and runs quality checks. If the scrape or quality checks fail, it restores the pre-run database backup by default.
