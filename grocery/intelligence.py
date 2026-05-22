@@ -400,9 +400,13 @@ def compute_deal_quality_scores(session: Session) -> int:
 
     rows_added = 0
     for product, metrics in products_with_metrics:
-        eff_price = _effective_price(product)
-        if eff_price is None:
+        # Skip products with no current price — can't evaluate a deal without
+        # knowing the price. Bonus products may have NULL currentPrice in the
+        # API (e.g. complex bundle deals), and non-bonus products with NULL
+        # currentPrice should not be treated as "deals" at all.
+        if product.current_price is None or product.current_price <= 0:
             continue
+        eff_price = product.current_price
 
         avg_price = metrics.avg_price
         hist_low = metrics.cheapest_price
@@ -413,7 +417,6 @@ def compute_deal_quality_scores(session: Session) -> int:
         if (
             product.is_bonus
             and product.price_before_bonus and product.price_before_bonus > 0
-            and product.current_price is not None
             and product.current_price < product.price_before_bonus
         ):
             discount_pct = round(
