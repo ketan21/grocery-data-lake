@@ -118,12 +118,16 @@ export function OverviewPage() {
                   <div className="text-xs" style={{ color: 'var(--muted)' }}>{d.brand} · {d.mainCategory}</div>
                 </div>
                 <div className="text-right ml-3 flex-shrink-0">
-                  <div className="text-sm font-mono font-semibold" style={{ color: 'var(--down)' }}>€{d.currentPrice.toFixed(2)}</div>
+                  <div className="text-sm font-mono font-semibold" style={{ color: 'var(--down)' }}>
+                    {d.currentPrice != null ? `€${d.currentPrice.toFixed(2)}` : '—'}
+                  </div>
                   <div className="flex items-center gap-1.5">
                     <Badge color={d.dealLabel === 'historical_low' ? 'green' : d.dealLabel === 'excellent_deal' ? 'blue' : 'yellow'}>
                       {d.dealLabel.replace(/_/g, ' ')}
                     </Badge>
-                    <span className="text-xs" style={{ color: 'var(--muted)' }}>−{d.discountPct.toFixed(0)}%</span>
+                    <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                      {d.discountPct != null ? `−${d.discountPct.toFixed(0)}%` : ''}
+                    </span>
                   </div>
                 </div>
               </div>

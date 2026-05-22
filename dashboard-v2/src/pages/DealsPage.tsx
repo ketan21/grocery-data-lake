@@ -114,14 +114,18 @@ export function DealsPage() {
                         </a>
                       </td>
                       <td className="py-2.5 px-3" style={{ color: 'var(--muted)' }}>{d.brand}</td>
-                      <td className="py-2.5 px-3 text-right font-mono font-medium" style={{ color: 'var(--down)' }}>€{d.currentPrice.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-right" style={{ color: 'var(--muted)' }}>−{d.discountPct.toFixed(1)}%</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-medium" style={{ color: 'var(--down)' }}>
+                        {d.currentPrice != null ? `€${d.currentPrice.toFixed(2)}` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right" style={{ color: 'var(--muted)' }}>
+                        {d.discountPct != null ? `−${d.discountPct.toFixed(1)}%` : '—'}
+                      </td>
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-2">
                           <Badge color={d.dealLabel === 'historical_low' ? 'green' : d.dealLabel === 'excellent_deal' ? 'blue' : 'yellow'}>
-                            {d.dealScore.toFixed(0)}
+                            {d.dealScore != null ? d.dealScore.toFixed(0) : '—'}
                           </Badge>
-                          <ScoreBar value={d.dealScore} />
+                          {d.dealScore != null && <ScoreBar value={d.dealScore} />}
                         </div>
                       </td>
                     </tr>
