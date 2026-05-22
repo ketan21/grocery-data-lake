@@ -377,6 +377,176 @@ class HealthValueRankingRow(Base):
     )
 
 
+class ProductPromotionFrequencyRow(Base):
+    """Promotion frequency analysis per product."""
+    __tablename__ = "analytics_product_promotion_frequency"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    total_observations = Column(Integer, default=0)
+    bonus_observations = Column(Integer, default=0)
+    bonus_frequency_pct = Column(Float)
+    avg_discount_pct = Column(Float)
+    max_discount_pct = Column(Float)
+    latest_bonus_start_date = Column(String(20))
+    latest_bonus_end_date = Column(String(20))
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_promo_freq_product", "product_id"),
+        Index("ix_promo_freq_bonus_pct", "bonus_frequency_pct", unique=False),
+    )
+
+
+class IngredientFlagRow(Base):
+    """Smart ingredient flags per product."""
+    __tablename__ = "analytics_ingredient_flags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    ingredient_count = Column(Integer, default=0)
+    contains_added_sugar = Column(Boolean, default=False)
+    contains_palm_oil = Column(Boolean, default=False)
+    contains_sweeteners = Column(Boolean, default=False)
+    contains_preservatives = Column(Boolean, default=False)
+    contains_emulsifiers = Column(Boolean, default=False)
+    contains_colourants = Column(Boolean, default=False)
+    contains_seed_oils = Column(Boolean, default=False)
+    contains_caffeine = Column(Boolean, default=False)
+    possible_vegan = Column(Boolean, default=False)
+    possible_vegetarian = Column(Boolean, default=False)
+    clean_label_score = Column(Float)
+    ultra_processed_score = Column(Float)
+    matched_terms_json = Column(Text)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ux_ingr_flags_product", "product_id", unique=True),
+        Index("ix_ingr_clean_label", "clean_label_score", unique=False),
+    )
+
+
+class AllergenSummaryRow(Base):
+    """Allergen summary per product."""
+    __tablename__ = "analytics_allergen_summary"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    contains_gluten = Column(Boolean, default=False)
+    contains_milk = Column(Boolean, default=False)
+    contains_nuts = Column(Boolean, default=False)
+    contains_peanuts = Column(Boolean, default=False)
+    contains_soy = Column(Boolean, default=False)
+    contains_egg = Column(Boolean, default=False)
+    contains_fish = Column(Boolean, default=False)
+    contains_shellfish = Column(Boolean, default=False)
+    may_contain_count = Column(Integer, default=0)
+    contains_count = Column(Integer, default=0)
+    allergen_risk_score = Column(Float)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ux_allergen_product", "product_id", unique=True),
+        Index("ix_allergen_risk", "allergen_risk_score", unique=False),
+    )
+
+
+class ProductAlternativeRow(Base):
+    """Product alternative recommendations."""
+    __tablename__ = "analytics_product_alternatives"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False)
+    alternative_product_id = Column(Integer, nullable=False)
+    alternative_type = Column(String(50), nullable=False)
+    price_saving_pct = Column(Float)
+    unit_price_saving_pct = Column(Float)
+    health_score_delta = Column(Float)
+    confidence = Column(Float)
+    explanation = Column(Text)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_alt_product_type", "product_id", "alternative_type"),
+        Index("ix_alt_confidence", "confidence", unique=False),
+    )
+
+
+class BasketDefinitionRow(Base):
+    """Basket definition templates."""
+    __tablename__ = "basket_definitions"
+
+    basket_id = Column(Integer, primary_key=True, autoincrement=True)
+    basket_name = Column(String(255), nullable=False)
+    description = Column(Text)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BasketItemRow(Base):
+    """Items within a basket definition."""
+    __tablename__ = "basket_items"
+
+    basket_item_id = Column(Integer, primary_key=True, autoincrement=True)
+    basket_id = Column(Integer, ForeignKey("basket_definitions.basket_id"), nullable=False)
+    main_category = Column(String(255))
+    sub_category = Column(String(255))
+    product_rule = Column(String(500))
+    quantity = Column(Integer, default=1)
+    preferred_product_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_basket_items_basket", "basket_id"),
+    )
+
+
+class BasketSnapshotRow(Base):
+    """Basket cost snapshots over time."""
+    __tablename__ = "basket_snapshots"
+
+    basket_snapshot_id = Column(Integer, primary_key=True, autoincrement=True)
+    basket_id = Column(Integer, ForeignKey("basket_definitions.basket_id"), nullable=False)
+    snapshot_date = Column(String(20), nullable=False)
+    total_current_price = Column(Float)
+    total_regular_price = Column(Float)
+    bonus_savings = Column(Float)
+    item_count = Column(Integer, default=0)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ix_basket_snapshots_date", "basket_id", "snapshot_date"),
+    )
+
+
+class BrandIntelligenceRow(Base):
+    """Brand-level intelligence metrics."""
+    __tablename__ = "analytics_brand_intelligence"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    brand = Column(String(255), nullable=False)
+    product_count = Column(Integer, default=0)
+    category_count = Column(Integer, default=0)
+    avg_price = Column(Float)
+    avg_unit_price = Column(Float)
+    avg_health_score = Column(Float)
+    bonus_share_pct = Column(Float)
+    avg_discount_pct = Column(Float)
+    price_volatility = Column(Float)
+    private_label_candidate = Column(Boolean, default=False)
+    computed_at = Column(DateTime, default=datetime.utcnow)
+    source_run_id = Column(Integer)
+
+    __table_args__ = (
+        Index("ux_brand_intel_brand", "brand", unique=True),
+        Index("ix_brand_intel_avg_price", "avg_price"),
+    )
+
+
 def get_engine():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)

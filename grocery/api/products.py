@@ -40,8 +40,12 @@ def search_products(
                 "mainCategory": p.main_category,
                 "subCategory": p.sub_category,
                 "isBonus": p.is_bonus,
+                "bonusMechanism": p.bonus_mechanism,
+                "bonusStartDate": p.bonus_start_date,
+                "bonusEndDate": p.bonus_end_date,
                 "nutriscore": p.nutriscore,
                 "imageUrl": p.image_url,
+                "ahUrl": f"https://www.ah.nl/producten/product/wi{p.webshop_id}",
             }
             for p in products
         ],
@@ -92,8 +96,12 @@ def list_products(
                 "mainCategory": p.main_category,
                 "subCategory": p.sub_category,
                 "isBonus": p.is_bonus,
+                "bonusMechanism": p.bonus_mechanism,
+                "bonusStartDate": p.bonus_start_date,
+                "bonusEndDate": p.bonus_end_date,
                 "nutriscore": p.nutriscore,
                 "imageUrl": p.image_url,
+                "ahUrl": f"https://www.ah.nl/producten/product/wi{p.webshop_id}",
             }
             for p in products
         ],
@@ -127,6 +135,7 @@ def get_product(webshop_id: int):
         "availableOnline": p.available_online,
         "descriptionHighlights": p.description_highlights,
         "imageUrl": p.image_url,
+        "ahUrl": f"https://www.ah.nl/producten/product/wi{p.webshop_id}",
         "nutrition": [
             {
                 "name": n.nutrient_name,

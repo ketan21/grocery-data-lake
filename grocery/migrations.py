@@ -390,6 +390,225 @@ def _m010_add_health_value_rankings(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _m011_add_product_promotion_frequency(conn: sqlite3.Connection) -> None:
+    """Create analytics_product_promotion_frequency table (v11)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_product_promotion_frequency (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id                  INTEGER NOT NULL,
+            total_observations          INTEGER DEFAULT 0,
+            bonus_observations          INTEGER DEFAULT 0,
+            bonus_frequency_pct         FLOAT,
+            avg_discount_pct            FLOAT,
+            max_discount_pct            FLOAT,
+            latest_bonus_start_date     VARCHAR(20),
+            latest_bonus_end_date       VARCHAR(20),
+            computed_at                 DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id               INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_promo_freq_product "
+        "ON analytics_product_promotion_frequency(product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_promo_freq_bonus_pct "
+        "ON analytics_product_promotion_frequency(bonus_frequency_pct DESC)"
+    )
+    conn.commit()
+
+
+def _m012_add_ingredient_flags(conn: sqlite3.Connection) -> None:
+    """Create analytics_ingredient_flags table (v12)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_ingredient_flags (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id                INTEGER NOT NULL,
+            ingredient_count          INTEGER DEFAULT 0,
+            contains_added_sugar      BOOLEAN DEFAULT 0,
+            contains_palm_oil         BOOLEAN DEFAULT 0,
+            contains_sweeteners       BOOLEAN DEFAULT 0,
+            contains_preservatives    BOOLEAN DEFAULT 0,
+            contains_emulsifiers      BOOLEAN DEFAULT 0,
+            contains_colourants       BOOLEAN DEFAULT 0,
+            contains_seed_oils        BOOLEAN DEFAULT 0,
+            contains_caffeine         BOOLEAN DEFAULT 0,
+            possible_vegan            BOOLEAN DEFAULT 0,
+            possible_vegetarian       BOOLEAN DEFAULT 0,
+            clean_label_score         FLOAT,
+            ultra_processed_score     FLOAT,
+            matched_terms_json        TEXT,
+            computed_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id             INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_ingr_flags_product "
+        "ON analytics_ingredient_flags(product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_ingr_clean_label "
+        "ON analytics_ingredient_flags(clean_label_score DESC)"
+    )
+    conn.commit()
+
+
+def _m013_add_allergen_summary(conn: sqlite3.Connection) -> None:
+    """Create analytics_allergen_summary table (v13)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_allergen_summary (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id              INTEGER NOT NULL,
+            contains_gluten         BOOLEAN DEFAULT 0,
+            contains_milk           BOOLEAN DEFAULT 0,
+            contains_nuts           BOOLEAN DEFAULT 0,
+            contains_peanuts        BOOLEAN DEFAULT 0,
+            contains_soy            BOOLEAN DEFAULT 0,
+            contains_egg            BOOLEAN DEFAULT 0,
+            contains_fish           BOOLEAN DEFAULT 0,
+            contains_shellfish      BOOLEAN DEFAULT 0,
+            may_contain_count       INTEGER DEFAULT 0,
+            contains_count          INTEGER DEFAULT 0,
+            allergen_risk_score     FLOAT,
+            computed_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id           INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_allergen_product "
+        "ON analytics_allergen_summary(product_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_allergen_risk "
+        "ON analytics_allergen_summary(allergen_risk_score DESC)"
+    )
+    conn.commit()
+
+
+def _m014_add_product_alternatives(conn: sqlite3.Connection) -> None:
+    """Create analytics_product_alternatives table (v14)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_product_alternatives (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id                INTEGER NOT NULL,
+            alternative_product_id    INTEGER NOT NULL,
+            alternative_type          VARCHAR(50) NOT NULL,
+            price_saving_pct          FLOAT,
+            unit_price_saving_pct     FLOAT,
+            health_score_delta        FLOAT,
+            confidence                FLOAT,
+            explanation               TEXT,
+            computed_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id             INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_alt_product_type "
+        "ON analytics_product_alternatives(product_id, alternative_type)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_alt_confidence "
+        "ON analytics_product_alternatives(confidence DESC)"
+    )
+    conn.commit()
+
+
+def _m015_add_basket_tables(conn: sqlite3.Connection) -> None:
+    """Create basket intelligence tables (v15)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS basket_definitions (
+            basket_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            basket_name   VARCHAR(255) NOT NULL,
+            description   TEXT,
+            active        BOOLEAN DEFAULT 1,
+            created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS basket_items (
+            basket_item_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            basket_id         INTEGER NOT NULL,
+            main_category     VARCHAR(255),
+            sub_category      VARCHAR(255),
+            product_rule      VARCHAR(500),
+            quantity          INTEGER DEFAULT 1,
+            preferred_product_id INTEGER,
+            FOREIGN KEY(basket_id) REFERENCES basket_definitions(basket_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_basket_items_basket "
+        "ON basket_items(basket_id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS basket_snapshots (
+            basket_snapshot_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            basket_id             INTEGER NOT NULL,
+            snapshot_date         DATE NOT NULL,
+            total_current_price   FLOAT,
+            total_regular_price   FLOAT,
+            bonus_savings         FLOAT,
+            item_count            INTEGER DEFAULT 0,
+            computed_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id         INTEGER,
+            FOREIGN KEY(basket_id) REFERENCES basket_definitions(basket_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_basket_snapshots_date "
+        "ON basket_snapshots(basket_id, snapshot_date)"
+    )
+    conn.commit()
+
+
+def _m016_add_brand_intelligence(conn: sqlite3.Connection) -> None:
+    """Create analytics_brand_intelligence table (v16)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS analytics_brand_intelligence (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            brand                   VARCHAR(255) NOT NULL,
+            product_count           INTEGER DEFAULT 0,
+            category_count          INTEGER DEFAULT 0,
+            avg_price               FLOAT,
+            avg_unit_price          FLOAT,
+            avg_health_score        FLOAT,
+            bonus_share_pct         FLOAT,
+            avg_discount_pct        FLOAT,
+            price_volatility        FLOAT,
+            private_label_candidate BOOLEAN DEFAULT 0,
+            computed_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_run_id           INTEGER
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_brand_intel_brand "
+        "ON analytics_brand_intelligence(brand)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_brand_intel_avg_price "
+        "ON analytics_brand_intelligence(avg_price)"
+    )
+    conn.commit()
+
+
 MIGRATIONS: list[tuple[int, str, callable]] = [
     (1, "add raw_json.sub_source column", _m001_add_raw_json_sub_source),
     (2, "add product extra detail columns", _m002_add_product_extra_columns),
@@ -401,6 +620,12 @@ MIGRATIONS: list[tuple[int, str, callable]] = [
     (8, "add deal quality scores", _m008_add_deal_quality_scores),
     (9, "add nutrition scores", _m009_add_nutrition_scores),
     (10, "add health value rankings", _m010_add_health_value_rankings),
+    (11, "add product promotion frequency", _m011_add_product_promotion_frequency),
+    (12, "add ingredient flags", _m012_add_ingredient_flags),
+    (13, "add allergen summary", _m013_add_allergen_summary),
+    (14, "add product alternatives", _m014_add_product_alternatives),
+    (15, "add basket intelligence tables", _m015_add_basket_tables),
+    (16, "add brand intelligence", _m016_add_brand_intelligence),
 ]
 
 

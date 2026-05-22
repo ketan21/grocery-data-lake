@@ -6,6 +6,7 @@ and write to analytics_* derived tables. Every row includes computed_at and sour
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import datetime
 from math import sqrt
@@ -14,13 +15,23 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .db import (
+    AllergenRow,
+    AllergenSummaryRow,
+    BasketDefinitionRow,
+    BasketItemRow,
+    BasketSnapshotRow,
+    BrandIntelligenceRow,
     CategoryPriceRankingRow,
     DealQualityScoreRow,
     HealthValueRankingRow,
+    IngredientFlagRow,
+    IngredientRow,
     NutritionRow,
     NutritionScoreRow,
     PriceHistoryRow,
     PriceMetricsRow,
+    ProductAlternativeRow,
+    ProductPromotionFrequencyRow,
     ProductRow,
     ScrapeRun,
     UnitPriceRow,
@@ -281,7 +292,7 @@ def compute_category_price_rankings(session: Session) -> int:
                 product_id=product.webshop_id,
                 product_title=product.title,
                 brand=product.brand,
-                current_price=product.current_price,
+                current_price=_effective_price(product),
                 unit_price=up.normalized_price_eur_per_unit if up else None,
                 base_unit=up.base_unit if up else None,
                 rank=rank,
@@ -711,6 +722,756 @@ def compute_health_value_rankings(session: Session) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Step 3: Promotion Frequency Intelligence
+# ---------------------------------------------------------------------------
+
+# Dutch/English terms for added sugars
+_ADDED_SUGAR_TERMS = {
+    "suiker", "suikers", "sugar", "sugars", "added sugar", "added sugars",
+    "rietsuiker", "rietssuiker", "cane sugar", "beet sugar",
+    "glucosesiroop", "glucose syrup", "high fructose corn syrup", "hfcs",
+    "fructosesiroop", "fructose syrup", "high-fructose corn syrup",
+    "maïssiroop", "maissirup", "corn syrup",
+    "stroop", "syrup", "honey", "honing",
+    "maltose", "maltodextrine", "maltodextrin",
+    "dextrose", "dextrine",
+    "invertsuiker", "invert sugar",
+    "concentrated grape juice", "geconcentreerde druivensap",
+    "concentrated apple juice", "geconcentreerde appelsap",
+    "evap", "evapo", "evaporated cane juice",
+    "honingsirup", "honey syrup",
+}
+
+# Palm oil terms
+_PALM_OIL_TERMS = {
+    "palmolie", "palm oil", "palmkernolie", "palm kernel oil",
+    "palm fat", "palmvet", "palm kernel fat", "palmkernvet",
+    "palmitate", "palmitic acid", "elaeis guineensis",
+    "vegetable oil", " plantaardige olie",  # ambiguous but common proxy
+}
+
+# Sweetener terms
+_SWEETENER_TERMS = {
+    "aspartaam", "aspartame", "acesulfam", "acesulfame",
+    "sucralose", "sucraloos", "saccharine", "saccharin",
+    "sucraloos", "sorbitol", "xylitol", "maltitol",
+    "isomalt", "erythritol", "mannitol",
+    "styrax", "stevia", "steviolglycosiden", "steviol glycosides",
+    "neotame", "adapaam", "advantam", "neohesperidine dihydrochalcone",
+    "aloheseridine", "neohesperidine",
+}
+
+# Preservative terms
+_PRESERVATIVE_TERMS = {
+    "sorbinezuur", "sorbic acid", "sorbates", "sorraat",
+    "benzoinezuur", "benzoic acid", "benzoates", "benzoaat",
+    "propionaat", "propionates", "propionic acid",
+    "natriumethylmaltol", "sodium ethyl maltolate",
+    "sulfi", "sulfite", "sulphite", "zwaveldioxide", "sulfur dioxide",
+    "natriumnitriet", "sodium nitrite", "kaliumnitriet", "potassium nitrite",
+    "natriumnitraat", "sodium nitrate", "kaliumnitraat", "potassium nitrate",
+    "e200", "e201", "e202", "e203", "e210", "e211", "e212", "e213",
+    "e214", "e215", "e216", "e217", "e249", "e250", "e251", "e252",
+}
+
+# Emulsifier terms
+_EMULSIFIER_TERMS = {
+    "mono- en diglyceriden", "mono- and diglycerides",
+    "lecithine", "lecithin", "sojalecithine", "soya lecithin",
+    "zonnebloemlecithine", "sunflower lecithin",
+    "polysorbaat", "polysorbate", "polysorbates",
+    "carnaubawas", "carnauba wax", "was",
+    "e471", "e322", "e432", "e433", "e434", "e435", "e436",
+}
+
+# Colourant terms
+_COLOURANT_TERMS = {
+    "tartrazine", "titan dioxide", "titanium dioxide",
+    "caramel", "caramellering", "caramel color",
+    "betanine", "betanin", "cursmine", "curcumin",
+    "anthocyanine", "anthocyanins", "chlorofyl", "chlorophyll",
+    "e100", "e101", "e102", "e104", "e110", "e120", "e122", "e123",
+    "e124", "e127", "e129", "e133", "e140", "e141", "e150",
+    "e150a", "e150b", "e150c", "e150d", "e160", "e161", "e162",
+    "e170", "e171",
+}
+
+# Seed oil terms
+_SEED_OIL_TERMS = {
+    "zonnebloemolie", "sunflower oil", "raapzaadolie", "rapeseed oil",
+    "canola oil", "maïsolie", "corn oil", "sojaolie", "soya oil",
+    "zadenolie", "seed oil", "plantaardige olie", "vegetable oil",
+    "lijnzaadolie", "linseed oil", "saflorolie", "safflower oil",
+}
+
+# Caffeine terms
+_CAFFEINE_TERMS = {
+    "caffeïne", "caffeine", "guarana", "mate", "taurine",
+    "taurien", "guarana extract", "koffie", "coffee extract",
+}
+
+# Animal-derived terms (for vegan detection)
+_ANIMAL_TERMS = {
+    "melk", "milk", "boter", "butter", "kaas", "cheese",
+    "room", "cream", "yoghurt", "yogurt", "whey", "wei",
+    "caseïne", "casein", "lactose", "melkpoeder", "milk powder",
+    "ei", "egg", "eieren", "eiwit", "egg white",
+    "eiwitten", "eggs", "egg yolk", "eidooier",
+    "vis", "fish", "vlees", "meat", "kip", "chicken",
+    "varken", "pork", "rund", "beef", "lam", "lamb",
+    "gelatine", "gelatin", "dierlijk", "animal",
+    "honing", "honey", "bijenwas", "beeswax",
+    "schelpdier", "shellfish", "garnalen", "shrimp",
+    "inktvis", "squid", "zeewier", "seaweed",  # seaweed is plant-based but often grouped
+}
+
+# Vegan-friendly terms (plant-based indicators)
+_VEGAN_INDICATORS = {
+    "plantaardig", "plant-based", "vegetisch", "vegetable",
+    "vegetarisch", "vegetarian", "vegan", "vega",
+}
+
+
+def compute_promotion_frequency(session: Session) -> int:
+    """Compute promotion frequency from price_history.
+
+    For each product with price history:
+    - Count total observations (scrape runs)
+    - Count bonus observations
+    - Calculate bonus_frequency_pct = bonus_observations / total_observations * 100
+    - Calculate avg/max discount from bonus periods
+    - Track latest bonus start/end dates
+
+    Returns:
+        Number of rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+
+    session.query(ProductPromotionFrequencyRow).delete()
+
+    # Group price history by product
+    histories = session.query(PriceHistoryRow).all()
+    product_histories: dict[int, list[PriceHistoryRow]] = defaultdict(list)
+    for h in histories:
+        product_histories[h.product_id].append(h)
+
+    rows_added = 0
+    for product_id, history_list in product_histories.items():
+        total = len(history_list)
+        bonus_obs = [h for h in history_list if h.is_bonus]
+        bonus_count = len(bonus_obs)
+
+        bonus_freq = round(bonus_count / total * 100, 2) if total > 0 else 0
+
+        # Calculate discounts for bonus observations
+        discounts = []
+        for h in bonus_obs:
+            if (h.price_before_bonus and h.price_before_bonus > 0
+                    and h.current_price and h.current_price < h.price_before_bonus):
+                disc = round((h.price_before_bonus - h.current_price) / h.price_before_bonus * 100, 2)
+                discounts.append(disc)
+
+        avg_discount = round(sum(discounts) / len(discounts), 2) if discounts else None
+        max_discount = max(discounts) if discounts else None
+
+        # Latest bonus dates
+        latest_start = None
+        latest_end = None
+        for h in bonus_obs:
+            if h.bonus_start_date:
+                if latest_start is None or h.bonus_start_date > latest_start:
+                    latest_start = h.bonus_start_date
+            if h.bonus_end_date:
+                if latest_end is None or h.bonus_end_date > latest_end:
+                    latest_end = h.bonus_end_date
+
+        row = ProductPromotionFrequencyRow(
+            product_id=product_id,
+            total_observations=total,
+            bonus_observations=bonus_count,
+            bonus_frequency_pct=bonus_freq,
+            avg_discount_pct=avg_discount,
+            max_discount_pct=max_discount,
+            latest_bonus_start_date=latest_start,
+            latest_bonus_end_date=latest_end,
+            computed_at=computed_at,
+            source_run_id=source_run_id,
+        )
+        session.add(row)
+        rows_added += 1
+
+    return rows_added
+
+
+def compute_ingredient_flags(session: Session) -> int:
+    """Compute smart ingredient flags from ingredient text.
+
+    For each product with ingredients:
+    - Scan ingredient text for known terms
+    - Set boolean flags for each category
+    - Compute clean_label_score (0-100, higher = cleaner)
+    - Compute ultra_processed_score (0-100, higher = more processed)
+    - Store matched terms as JSON
+
+    Returns:
+        Number of rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+
+    session.query(IngredientFlagRow).delete()
+
+    products = session.query(ProductRow).all()
+    rows_added = 0
+
+    for product in products:
+        # Get ingredients text
+        ingredients_text = ""
+        if product.ingredients:
+            try:
+                ing_list = json.loads(product.ingredients)
+                if isinstance(ing_list, list):
+                    ingredients_text = " ".join(str(i) for i in ing_list).lower()
+                else:
+                    ingredients_text = str(ing_list).lower()
+            except (json.JSONDecodeError, TypeError):
+                ingredients_text = str(product.ingredients).lower()
+        elif product.description_highlights:
+            ingredients_text = product.description_highlights.lower()
+
+        if not ingredients_text:
+            continue
+
+        matched_terms: dict[str, list[str]] = {}
+
+        def _scan(terms: set, key: str) -> bool:
+            matches = []
+            for term in terms:
+                if term.lower() in ingredients_text:
+                    matches.append(term)
+            if matches:
+                matched_terms[key] = matches
+            return len(matches) > 0
+
+        has_added_sugar = _scan(_ADDED_SUGAR_TERMS, "added_sugar")
+        has_palm_oil = _scan(_PALM_OIL_TERMS, "palm_oil")
+        has_sweeteners = _scan(_SWEETENER_TERMS, "sweeteners")
+        has_preservatives = _scan(_PRESERVATIVE_TERMS, "preservatives")
+        has_emulsifiers = _scan(_EMULSIFIER_TERMS, "emulsifiers")
+        has_colourants = _scan(_COLOURANT_TERMS, "colourants")
+        has_seed_oils = _scan(_SEED_OIL_TERMS, "seed_oils")
+        has_caffeine = _scan(_CAFFEINE_TERMS, "caffeine")
+
+        # Vegan/vegetarian detection
+        has_animal = _scan(_ANIMAL_TERMS, "animal_derived")
+        has_vegan_indicator = _scan(_VEGAN_INDICATORS, "vegan_indicators")
+
+        possible_vegetarian = not has_animal or has_vegan_indicator
+        possible_vegan = not has_animal and has_vegan_indicator
+
+        # Clean label score (100 = perfectly clean)
+        clean_score = 100.0
+        if has_added_sugar:
+            clean_score -= 15
+        if has_palm_oil:
+            clean_score -= 10
+        if has_sweeteners:
+            clean_score -= 15
+        if has_preservatives:
+            clean_score -= 15
+        if has_emulsifiers:
+            clean_score -= 10
+        if has_colourants:
+            clean_score -= 15
+        if has_seed_oils:
+            clean_score -= 5
+        clean_score = max(0, min(100, round(clean_score, 1)))
+
+        # Ultra-processed score (0 = whole food, 100 = ultra-processed)
+        ultra_score = 0.0
+        if has_added_sugar:
+            ultra_score += 15
+        if has_sweeteners:
+            ultra_score += 15
+        if has_preservatives:
+            ultra_score += 20
+        if has_emulsifiers:
+            ultra_score += 20
+        if has_colourants:
+            ultra_score += 15
+        if has_seed_oils:
+            ultra_score += 10
+        if has_palm_oil:
+            ultra_score += 5
+        ultra_score = max(0, min(100, round(ultra_score, 1)))
+
+        # Count ingredients (rough estimate from text)
+        ingredient_count = len([i for i in ingredients_text.split(",") if i.strip()])
+
+        row = IngredientFlagRow(
+            product_id=product.webshop_id,
+            ingredient_count=ingredient_count,
+            contains_added_sugar=has_added_sugar,
+            contains_palm_oil=has_palm_oil,
+            contains_sweeteners=has_sweeteners,
+            contains_preservatives=has_preservatives,
+            contains_emulsifiers=has_emulsifiers,
+            contains_colourants=has_colourants,
+            contains_seed_oils=has_seed_oils,
+            contains_caffeine=has_caffeine,
+            possible_vegan=possible_vegan,
+            possible_vegetarian=possible_vegetarian,
+            clean_label_score=clean_score,
+            ultra_processed_score=ultra_score,
+            matched_terms_json=json.dumps(matched_terms, ensure_ascii=False),
+            computed_at=computed_at,
+            source_run_id=source_run_id,
+        )
+        session.add(row)
+        rows_added += 1
+
+    return rows_added
+
+
+def compute_allergen_summary(session: Session) -> int:
+    """Compute allergen summary from allergen rows.
+
+    For each product with allergen data:
+    - Normalize allergen names to categories
+    - Set boolean flags for each major allergen
+    - Count CONTAINS vs MAY_CONTAIN
+    - Compute allergen_risk_score (0-100, higher = more allergens)
+
+    Returns:
+        Number of rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+
+    session.query(AllergenSummaryRow).delete()
+
+    # Allergen name normalization
+    ALLERGEN_MAP: dict[str, set[str]] = {
+        "gluten": {"gluten", "tarwe", "wheat", "weizen", "rogge", "rye", "gerst", "barley", "haver", "oats", "spelt", "kamut", "secale cereale", "triticum"},
+        "milk": {"melk", "milk", "lactose", "caseïne", "caseine", "casein", "wei", "whey", "boter", "butter", "kaas", "cheese", "room", "cream"},
+        "nuts": {"noten", "nuts", "amandel", "almond", "hazelnoot", "hazelnut", "cashew", "pinda", "walnoot", "walnut", "pecan", "macadamia", "pistache", "pistachio"},
+        "peanuts": {"pinda", "peanut", "pinda's", "peanuts", "arachis"},
+        "soy": {"soja", "soy", "sojaboon", "soybean", "sojameel", "soya flour"},
+        "egg": {"ei", "egg", "eieren", "eggs", "eidooier", "egg yolk", "eiwit", "egg white", "albumine", "albumin"},
+        "fish": {"vis", "fish", "zalm", "salmon", "tonijn", "tuna", "cabillaud", "cod", "heek", "haddock"},
+        "shellfish": {"schelpdier", "shellfish", "garnalen", "shrimp", "kreeft", "crab", "inktvis", "squid", "mosselen", "mussels", "oesters", "oysters", "garnalen", "prawns"},
+    }
+
+    allergen_rows = session.query(AllergenRow).all()
+    product_allergens: dict[int, list[AllergenRow]] = defaultdict(list)
+    for a in allergen_rows:
+        product_allergens[a.product_id].append(a)
+
+    rows_added = 0
+    for product_id, allergen_list in product_allergens.items():
+        contains_gluten = False
+        contains_milk = False
+        contains_nuts = False
+        contains_peanuts = False
+        contains_soy = False
+        contains_egg = False
+        contains_fish = False
+        contains_shellfish = False
+
+        may_contain_count = 0
+        contains_count = 0
+
+        for a in allergen_list:
+            name_lower = (a.allergen_name or "").lower()
+            level = (a.level or "CONTAINS").upper()
+
+            # Skip FREE_FROM — product doesn't actually contain this allergen
+            if level == "FREE_FROM":
+                continue
+
+            if "MAY" in level:
+                may_contain_count += 1
+            else:
+                contains_count += 1
+
+            for category, terms in ALLERGEN_MAP.items():
+                if name_lower in terms:
+                    if category == "gluten":
+                        contains_gluten = True
+                    elif category == "milk":
+                        contains_milk = True
+                    elif category == "nuts":
+                        contains_nuts = True
+                    elif category == "peanuts":
+                        contains_peanuts = True
+                    elif category == "soy":
+                        contains_soy = True
+                    elif category == "egg":
+                        contains_egg = True
+                    elif category == "fish":
+                        contains_fish = True
+                    elif category == "shellfish":
+                        contains_shellfish = True
+
+        # Risk score: weighted by severity
+        risk = 0.0
+        if contains_gluten:
+            risk += 20
+        if contains_milk:
+            risk += 15
+        if contains_nuts:
+            risk += 20
+        if contains_peanuts:
+            risk += 20
+        if contains_soy:
+            risk += 10
+        if contains_egg:
+            risk += 10
+        if contains_fish:
+            risk += 10
+        if contains_shellfish:
+            risk += 15
+        risk += min(may_contain_count * 5, 15)
+        risk = min(100, round(risk, 1))
+
+        row = AllergenSummaryRow(
+            product_id=product_id,
+            contains_gluten=contains_gluten,
+            contains_milk=contains_milk,
+            contains_nuts=contains_nuts,
+            contains_peanuts=contains_peanuts,
+            contains_soy=contains_soy,
+            contains_egg=contains_egg,
+            contains_fish=contains_fish,
+            contains_shellfish=contains_shellfish,
+            may_contain_count=may_contain_count,
+            contains_count=contains_count,
+            allergen_risk_score=risk,
+            computed_at=computed_at,
+            source_run_id=source_run_id,
+        )
+        session.add(row)
+        rows_added += 1
+
+    return rows_added
+
+
+def compute_product_alternatives(session: Session) -> int:
+    """Compute product alternatives based on category, brand, and price.
+
+    For each product, find alternatives:
+    - cheaper_alternative: same category/subcategory, lower price
+    - healthier_alternative: same category, higher health score
+    - same_brand_alternative: same brand, different product
+
+    Returns:
+        Number of alternative rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+
+    session.query(ProductAlternativeRow).delete()
+
+    products = session.query(ProductRow).all()
+    nutrition_scores = {ns.product_id: ns for ns in session.query(NutritionScoreRow).all()}
+    unit_prices = {up.product_id: up for up in session.query(UnitPriceRow).all()}
+
+    # Group by category/subcategory
+    cat_groups: dict[str, list[ProductRow]] = defaultdict(list)
+    subcat_groups: dict[tuple[str, str], list[ProductRow]] = defaultdict(list)
+    brand_groups: dict[str, list[ProductRow]] = defaultdict(list)
+
+    for p in products:
+        if p.main_category:
+            cat_groups[p.main_category].append(p)
+        if p.sub_category:
+            subcat_groups[(p.main_category, p.sub_category)].append(p)
+        if p.brand:
+            brand_groups[p.brand].append(p)
+
+    rows_added = 0
+
+    for product in products:
+        eff_price = _effective_price(product)
+        if eff_price is None:
+            continue
+
+        my_health = nutrition_scores.get(product.webshop_id)
+        my_up = unit_prices.get(product.webshop_id)
+
+        # Cheaper alternative (same subcategory or category)
+        candidates = []
+        if product.sub_category:
+            candidates = subcat_groups.get((product.main_category, product.sub_category), [])
+        if not candidates and product.main_category:
+            candidates = cat_groups.get(product.main_category, [])
+
+        for alt in candidates:
+            if alt.webshop_id == product.webshop_id:
+                continue
+            alt_price = _effective_price(alt)
+            if alt_price is None or alt_price >= eff_price:
+                continue
+
+            saving_pct = round((eff_price - alt_price) / eff_price * 100, 2)
+            alt_up = unit_prices.get(alt.webshop_id)
+            unit_saving = None
+            if my_up and alt_up:
+                unit_saving = round((my_up.normalized_price_eur_per_unit - alt_up.normalized_price_eur_per_unit) / my_up.normalized_price_eur_per_unit * 100, 2)
+
+            alt_health = nutrition_scores.get(alt.webshop_id)
+            health_delta = None
+            if my_health and alt_health:
+                health_delta = round(alt_health.health_score - my_health.health_score, 1)
+
+            confidence = min(0.9, 0.5 + (0.1 if product.sub_category == alt.sub_category else 0) + (0.1 if product.brand == alt.brand else 0) + (0.1 if saving_pct > 20 else 0))
+
+            session.add(ProductAlternativeRow(
+                product_id=product.webshop_id,
+                alternative_product_id=alt.webshop_id,
+                alternative_type="cheaper_alternative",
+                price_saving_pct=saving_pct,
+                unit_price_saving_pct=unit_saving,
+                health_score_delta=health_delta,
+                confidence=round(confidence, 2),
+                explanation=f"{alt.brand or 'Unknown'} {alt.title[:50]}... is {saving_pct}% cheaper",
+                computed_at=computed_at,
+                source_run_id=source_run_id,
+            ))
+            rows_added += 1
+            break  # Only top cheaper alternative
+
+        # Healthier alternative (same category, higher health score)
+        if my_health:
+            cat_candidates = cat_groups.get(product.main_category, [])
+            healthier = [
+                c for c in cat_candidates
+                if c.webshop_id != product.webshop_id
+                and nutrition_scores.get(c.webshop_id)
+                and nutrition_scores[c.webshop_id].health_score > my_health.health_score
+            ]
+            if healthier:
+                healthier.sort(key=lambda c: nutrition_scores[c.webshop_id].health_score, reverse=True)
+                best = healthier[0]
+                alt_health = nutrition_scores[best.webshop_id]
+                health_delta = round(alt_health.health_score - my_health.health_score, 1)
+                alt_price = _effective_price(best)
+                price_saving = None
+                if alt_price:
+                    price_saving = round((eff_price - alt_price) / eff_price * 100, 2)
+
+                session.add(ProductAlternativeRow(
+                    product_id=product.webshop_id,
+                    alternative_product_id=best.webshop_id,
+                    alternative_type="healthier_alternative",
+                    price_saving_pct=price_saving,
+                    unit_price_saving_pct=None,
+                    health_score_delta=health_delta,
+                    confidence=0.85,
+                    explanation=f"{best.brand or 'Unknown'} {best.title[:50]}... has health score {alt_health.health_score} vs {my_health.health_score}",
+                    computed_at=computed_at,
+                    source_run_id=source_run_id,
+                ))
+                rows_added += 1
+
+        # Same brand alternative
+        if product.brand:
+            brand_candidates = brand_groups.get(product.brand, [])
+            for alt in brand_candidates:
+                if alt.webshop_id == product.webshop_id:
+                    continue
+                alt_price = _effective_price(alt)
+                if alt_price is None:
+                    continue
+                price_diff_pct = round((alt_price - eff_price) / eff_price * 100, 2)
+                session.add(ProductAlternativeRow(
+                    product_id=product.webshop_id,
+                    alternative_product_id=alt.webshop_id,
+                    alternative_type="same_brand",
+                    price_saving_pct=-price_diff_pct if price_diff_pct < 0 else None,
+                    unit_price_saving_pct=None,
+                    health_score_delta=None,
+                    confidence=0.7,
+                    explanation=f"Same brand ({product.brand}): {alt.title[:50]}...",
+                    computed_at=computed_at,
+                    source_run_id=source_run_id,
+                ))
+                rows_added += 1
+                break  # Only one same-brand alternative
+
+    return rows_added
+
+
+def compute_basket_snapshots(session: Session) -> int:
+    """Compute basket cost snapshots for all active baskets.
+
+    For each active basket:
+    - Match basket items to current products
+    - Calculate total current price (with bonuses)
+    - Calculate total regular price (before bonuses)
+    - Calculate bonus savings
+    - Store snapshot
+
+    Returns:
+        Number of snapshot rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    baskets = session.query(BasketDefinitionRow).filter(BasketDefinitionRow.active == True).all()
+    rows_added = 0
+
+    for basket in baskets:
+        items = session.query(BasketItemRow).filter(BasketItemRow.basket_id == basket.basket_id).all()
+        if not items:
+            continue
+
+        total_current = 0.0
+        total_regular = 0.0
+        item_count = 0
+
+        for item in items:
+            # Find matching product
+            query = session.query(ProductRow).filter(
+                ProductRow.main_category == item.main_category,
+            )
+            if item.sub_category:
+                query = query.filter(ProductRow.sub_category == item.sub_category)
+
+            # Prefer specific product if set
+            if item.preferred_product_id:
+                query = query.filter(ProductRow.webshop_id == item.preferred_product_id)
+            elif item.product_rule == "cheapest":
+                query = query.order_by(ProductRow.current_price.asc())
+            elif item.product_rule == "healthiest":
+                # Join with nutrition scores
+                query = query.join(NutritionScoreRow, NutritionScoreRow.product_id == ProductRow.webshop_id).order_by(NutritionScoreRow.health_score.desc())
+
+            product = query.first()
+            if product:
+                eff_price = _effective_price(product) or 0
+                regular_price = product.price_before_bonus or product.current_price or 0
+                total_current += eff_price * item.quantity
+                total_regular += regular_price * item.quantity
+                item_count += item.quantity
+
+        bonus_savings = round(total_regular - total_current, 2)
+
+        row = BasketSnapshotRow(
+            basket_id=basket.basket_id,
+            snapshot_date=today,
+            total_current_price=round(total_current, 2),
+            total_regular_price=round(total_regular, 2),
+            bonus_savings=bonus_savings,
+            item_count=item_count,
+            computed_at=computed_at,
+            source_run_id=source_run_id,
+        )
+        session.add(row)
+        rows_added += 1
+
+    return rows_added
+
+
+def compute_brand_intelligence(session: Session) -> int:
+    """Compute brand-level intelligence metrics.
+
+    For each brand:
+    - Count products and categories
+    - Average price, unit price, health score
+    - Bonus share % and avg discount
+    - Price volatility
+    - Private label candidate flag
+
+    Returns:
+        Number of rows inserted.
+    """
+    computed_at = datetime.utcnow()
+    source_run_id = _latest_scrape_run_id(session)
+
+    session.query(BrandIntelligenceRow).delete()
+
+    products = session.query(ProductRow).filter(ProductRow.brand.isnot(None)).all()
+    nutrition_scores = {ns.product_id: ns for ns in session.query(NutritionScoreRow).all()}
+    unit_prices = {up.product_id: up for up in session.query(UnitPriceRow).all()}
+    price_metrics = {pm.product_id: pm for pm in session.query(PriceMetricsRow).all()}
+
+    brand_groups: dict[str, list[ProductRow]] = defaultdict(list)
+    for p in products:
+        brand_groups[p.brand].append(p)
+
+    rows_added = 0
+    for brand, brand_products in brand_groups.items():
+        prices = [_effective_price(p) for p in brand_products]
+        prices = [p for p in prices if p is not None]
+
+        unit_price_vals = [
+            unit_prices[p.webshop_id].normalized_price_eur_per_unit
+            for p in brand_products
+            if unit_prices.get(p.webshop_id)
+        ]
+
+        health_vals = [
+            nutrition_scores[p.webshop_id].health_score
+            for p in brand_products
+            if nutrition_scores.get(p.webshop_id)
+        ]
+
+        bonus_products = [p for p in brand_products if p.is_bonus]
+        bonus_share = round(len(bonus_products) / len(brand_products) * 100, 2) if brand_products else 0
+
+        # Avg discount for bonus products
+        discounts = []
+        for p in bonus_products:
+            if (p.price_before_bonus and p.price_before_bonus > 0
+                    and p.current_price and p.current_price < p.price_before_bonus):
+                discounts.append((p.price_before_bonus - p.current_price) / p.price_before_bonus * 100)
+        avg_discount = round(sum(discounts) / len(discounts), 2) if discounts else None
+
+        # Avg volatility
+        volatilities = [
+            price_metrics[p.webshop_id].price_volatility
+            for p in brand_products
+            if price_metrics.get(p.webshop_id) and price_metrics[p.webshop_id].price_volatility is not None
+        ]
+        avg_volatility = round(sum(volatilities) / len(volatilities), 4) if volatilities else None
+
+        # Category count
+        categories = set()
+        for p in brand_products:
+            if p.main_category:
+                categories.add(p.main_category)
+
+        # Private label candidate: low product count, single category, low bonus share
+        private_label = (
+            len(brand_products) <= 20
+            and len(categories) <= 2
+            and bonus_share < 10
+        )
+
+        row = BrandIntelligenceRow(
+            brand=brand,
+            product_count=len(brand_products),
+            category_count=len(categories),
+            avg_price=round(sum(prices) / len(prices), 2) if prices else None,
+            avg_unit_price=round(sum(unit_price_vals) / len(unit_price_vals), 2) if unit_price_vals else None,
+            avg_health_score=round(sum(health_vals) / len(health_vals), 1) if health_vals else None,
+            bonus_share_pct=bonus_share,
+            avg_discount_pct=avg_discount,
+            price_volatility=avg_volatility,
+            private_label_candidate=private_label,
+            computed_at=computed_at,
+            source_run_id=source_run_id,
+        )
+        session.add(row)
+        rows_added += 1
+
+    return rows_added
+
+
+# ---------------------------------------------------------------------------
 # Public convenience: run all intelligence computations
 # ---------------------------------------------------------------------------
 
@@ -722,12 +1483,18 @@ def compute_all_intelligence(session: Session) -> dict[str, int]:
     2. category_price_rankings
     3. nutrition_scores
     4. health_value_rankings (depends on nutrition_scores)
+    5. promotion_frequency (depends on price_history)
+    6. ingredient_flags (depends on product ingredients)
+    7. allergen_summary (depends on allergen rows)
+    8. product_alternatives (depends on nutrition_scores, unit_prices)
+    9. basket_snapshots (depends on basket definitions)
+    10. brand_intelligence (depends on all metrics)
 
     Returns:
         Dict of {table_name: rows_inserted}.
     """
     deal_scores = compute_deal_quality_scores(session)
-    session.flush()  # Make deal scores available for category rankings
+    session.flush()
 
     cat_rankings = compute_category_price_rankings(session)
     session.flush()
@@ -736,10 +1503,34 @@ def compute_all_intelligence(session: Session) -> dict[str, int]:
     session.flush()
 
     hv_rankings = compute_health_value_rankings(session)
+    session.flush()
+
+    promo_freq = compute_promotion_frequency(session)
+    session.flush()
+
+    ingr_flags = compute_ingredient_flags(session)
+    session.flush()
+
+    allergen_sum = compute_allergen_summary(session)
+    session.flush()
+
+    alternatives = compute_product_alternatives(session)
+    session.flush()
+
+    basket_snaps = compute_basket_snapshots(session)
+    session.flush()
+
+    brand_intel = compute_brand_intelligence(session)
 
     return {
         "dealQualityScores": deal_scores,
         "categoryPriceRankings": cat_rankings,
         "nutritionScores": nutr_scores,
         "healthValueRankings": hv_rankings,
+        "promotionFrequency": promo_freq,
+        "ingredientFlags": ingr_flags,
+        "allergenSummary": allergen_sum,
+        "productAlternatives": alternatives,
+        "basketSnapshots": basket_snaps,
+        "brandIntelligence": brand_intel,
     }

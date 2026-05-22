@@ -297,6 +297,7 @@ def price_changes(
                 "bonusMechanism": row["bonus_mechanism"],
                 "recordedAt": row["recorded_at"],
                 "runId": row["scrape_run_id"],
+                "ahUrl": f"https://www.ah.nl/producten/product/wi{row['product_id']}",
             }
             for row in rows
         ]
@@ -439,6 +440,7 @@ def bonus_overview(db: Session = Depends(get_db)):
                 "shelfPrice": _round(row["price_before_bonus"]),
                 "discountPct": _round(row["discount_pct"]),
                 "bonusMechanism": row["bonus_mechanism"],
+                "ahUrl": f"https://www.ah.nl/producten/product/wi{row['webshop_id']}",
             }
             for row in deal_rows
         ],
